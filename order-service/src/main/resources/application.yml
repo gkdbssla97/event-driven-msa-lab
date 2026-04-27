@@ -1,6 +1,16 @@
 spring:
   application:
     name: order-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
 server:
   port: 8081
+
+app:
+  kafka:
+    topics:
+      order-created: order-created
