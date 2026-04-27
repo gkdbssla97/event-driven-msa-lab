@@ -1,6 +1,28 @@
 spring:
   application:
     name: websocket-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: websocket-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.example.kafkatoy.contracts
+        spring.json.value.default.type: com.example.kafkatoy.contracts.PaymentCompletedEvent
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
 server:
   port: 8083
+
+app:
+  kafka:
+    topics:
+      payment-completed: payment-completed
+  websocket:
+    allowed-origin-patterns:
+      - http://localhost:*
+      - http://127.0.0.1:*
