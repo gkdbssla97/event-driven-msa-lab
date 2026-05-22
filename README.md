@@ -343,6 +343,46 @@ scripts/
 - 인증: `GITHUB_TOKEN` (별도 API 키 불필요, `models: read` 권한으로 GitHub Models 사용)
 - 동일 PR에 재push 시 기존 리뷰 코멘트를 **업데이트** (중복 방지)
 
+### 환경별 적용 전략 비교
+
+> "왜 토이프로젝트에서는 GitHub Actions를 썼고, 업무환경에서는 Claude Skills를 쓰나요?"
+> → 차이는 **무료/유료가 아니라 자동화 수준과 실행 위치**입니다.
+
+| 항목 | 토이프로젝트<br>(GitHub Actions + GitHub Models) | 업무환경<br>(Claude Code Skills + Jenkins) |
+|------|---|---|
+| **트리거** | PR 이벤트 → 완전 자동 | 개발자가 `/pr-review` 직접 입력 → 반자동 |
+| **실행 위치** | GitHub Actions 클라우드 | 로컬 Claude Code 세션 |
+| **AI 모델** | GPT-4o (GitHub Models) | Claude Sonnet / Opus |
+| **인증** | `GITHUB_TOKEN` (무료, 추가 계정 불필요) | Claude Code Pro / Team 플랜 |
+| **CI 연동** | GitHub Actions workflow | Jenkins pipeline stage |
+| **팀 공유 방법** | `.github/workflows/*.yml` 커밋 | `.claude/skills/*.md` 커밋 |
+| **사람 개입** | 없음 | 있음 (명령어 입력) |
+| **컨텍스트 이해** | diff 텍스트만 전달 | Claude가 파일 직접 읽고 분석 가능 |
+| **적합한 상황** | PR마다 자동 리뷰가 필요한 경우 | 특정 PR을 깊게 리뷰하고 싶을 때 |
+
+```mermaid
+flowchart LR
+    subgraph 토이프로젝트["토이프로젝트 (GitHub Actions)"]
+        direction LR
+        A[git push] --> B[PR open]
+        B --> C[Actions 자동 트리거]
+        C --> D[GitHub Models GPT-4o]
+        D --> E[PR 코멘트 자동 게시]
+    end
+
+    subgraph 업무환경["업무환경 (Claude Skills + Jenkins)"]
+        direction LR
+        F[개발자] -->|/pr-review 입력| G[Claude Code 로컬]
+        G --> H[Claude Sonnet/Opus]
+        H --> I[리뷰 결과 출력 + PR 코멘트]
+        J[Jenkins] -->|pipeline stage| K[Claude API 호출]
+        K --> I
+    end
+```
+
+두 방식은 **상호 보완적**이며 함께 사용할 수 있습니다.
+로컬에서 `/pr-review`로 빠르게 확인 → PR push 후 Actions가 팀 공유용 리뷰 자동 게시.
+
 ## 단계별 로드맵
 
 ### Phase 1
