@@ -2,6 +2,7 @@ package com.example.kafkatoy.payment;
 
 import com.example.kafkatoy.contracts.OrderCreatedEvent;
 import com.example.kafkatoy.contracts.PaymentCompletedEvent;
+import com.example.kafkatoy.contracts.PaymentFailedEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -18,25 +19,35 @@ public class OrderCreatedEventListener {
     private final ObjectMapper objectMapper;
     private final PaymentService paymentService;
     private final PaymentCompletedEventPublisher paymentCompletedEventPublisher;
+    private final PaymentFailedEventPublisher paymentFailedEventPublisher;
 
     public OrderCreatedEventListener(
             ObjectMapper objectMapper,
             PaymentService paymentService,
-            PaymentCompletedEventPublisher paymentCompletedEventPublisher
+            PaymentCompletedEventPublisher paymentCompletedEventPublisher,
+            PaymentFailedEventPublisher paymentFailedEventPublisher
     ) {
         this.objectMapper = objectMapper;
         this.paymentService = paymentService;
         this.paymentCompletedEventPublisher = paymentCompletedEventPublisher;
+        this.paymentFailedEventPublisher = paymentFailedEventPublisher;
     }
 
     @KafkaListener(topics = "${app.kafka.topics.order-created}")
     public void handle(String payload) {
         OrderCreatedEvent event = deserialize(payload);
-        log.info("Received order-created event: orderId={}, userId={}", event.orderId(), event.userId());
+        log.info("Received order-created: orderId={}", event.orderId());
 
-        PaymentCompletedEvent completedEvent = processWithRetry(event);
-        paymentCompletedEventPublisher.publish(completedEvent);
-        log.info("Published payment-completed event: orderId={}, userId={}", completedEvent.orderId(), completedEvent.userId());
+        try {
+            PaymentCompletedEvent completedEvent = processWithRetry(event);
+            paymentCompletedEventPublisher.publish(completedEvent);
+            log.info("Published payment-completed: orderId={}", completedEvent.orderId());
+        } catch (Exception e) {
+            log.error("Payment failed after {} retries, publishing payment-failed: orderId={}", MAX_RETRY, event.orderId());
+            paymentFailedEventPublisher.publish(
+                    PaymentFailedEvent.of(event.orderId(), event.userId(), e.getMessage())
+            );
+        }
     }
 
     private PaymentCompletedEvent processWithRetry(OrderCreatedEvent event) {
@@ -47,7 +58,6 @@ public class OrderCreatedEventListener {
             } catch (Exception e) {
                 attempt++;
                 if (attempt >= MAX_RETRY) {
-                    log.error("Payment processing failed after {} attempts: orderId={}", MAX_RETRY, event.orderId());
                     throw e;
                 }
                 log.warn("Payment processing failed, retrying ({}/{}): orderId={}", attempt, MAX_RETRY, event.orderId());
@@ -67,8 +77,8 @@ public class OrderCreatedEventListener {
     private OrderCreatedEvent deserialize(String payload) {
         try {
             return objectMapper.readValue(payload, OrderCreatedEvent.class);
-        } catch (JsonProcessingException exception) {
-            throw new IllegalStateException("Failed to deserialize order-created event", exception);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to deserialize order-created event", e);
         }
     }
 }

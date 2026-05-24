@@ -26,7 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
-@EmbeddedKafka(partitions = 1, topics = {"order-created"}, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
+@EmbeddedKafka(partitions = 1, topics = {"order-created", "payment-completed", "payment-failed"}, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 class OrderServiceApplicationTests {
 
     @Autowired
@@ -50,7 +50,7 @@ class OrderServiceApplicationTests {
                                 """))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.userId").value("user-1"))
-                .andExpect(jsonPath("$.status").value("ACCEPTED"))
+                .andExpect(jsonPath("$.status").value("PENDING"))
                 .andExpect(jsonPath("$.orderId").isNotEmpty());
 
         Consumer<String, OrderCreatedEvent> consumer = createConsumer();

@@ -5,27 +5,30 @@ import com.example.kafkatoy.contracts.PaymentCompletedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class PaymentService {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
-    private final Map<String, PaymentCompletedEvent> processedOrders = new ConcurrentHashMap<>();
+    private final PaymentRepository paymentRepository;
 
+    public PaymentService(PaymentRepository paymentRepository) {
+        this.paymentRepository = paymentRepository;
+    }
+
+    @Transactional
     public PaymentCompletedEvent process(OrderCreatedEvent event) {
         String orderId = event.orderId();
 
-        if (processedOrders.containsKey(orderId)) {
-            log.warn("Duplicate payment request detected, returning cached result: orderId={}", orderId);
-            return processedOrders.get(orderId);
+        if (paymentRepository.existsById(orderId)) {
+            log.warn("Duplicate payment request, skipping: orderId={}", orderId);
+            PaymentRecord existing = paymentRepository.findById(orderId).orElseThrow();
+            return PaymentCompletedEvent.initial(existing.getOrderId(), existing.getUserId());
         }
 
-        PaymentCompletedEvent result = PaymentCompletedEvent.initial(orderId, event.userId());
-        processedOrders.put(orderId, result);
-        return result;
+        paymentRepository.save(PaymentRecord.success(orderId, event.userId()));
+        return PaymentCompletedEvent.initial(orderId, event.userId());
     }
 }
