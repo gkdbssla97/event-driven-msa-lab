@@ -157,6 +157,9 @@ event-driven-msa-lab
 - `scripts/dev/down.sh`
 - `scripts/dev/status.sh`
 - `scripts/dev/topic.sh`
+- `scripts/dev/build-app-images.sh`
+- `scripts/dev/deploy-apps.sh`
+- `scripts/dev/app-status.sh`
 - `Makefile`
 
 ### 사용 흐름
@@ -167,6 +170,9 @@ make dev-status
 make dev-topic-create-order
 make dev-topic-create-payment
 make dev-topic-list
+make app-build
+make app-deploy
+make app-status
 ```
 
 ### 현재 인프라 범위
@@ -183,6 +189,83 @@ make dev-topic-list
 1. 애플리케이션 기능 검증: `./gradlew test`, `bootRun`, Embedded Kafka 기반 검증
 2. 클러스터 인프라 검증: `make dev-up`, `make dev-status` 로 k3s 내부 Kafka 배포 자산 확인
 
+### 애플리케이션을 k3s 파드로 올리는 흐름
+
+```bash
+make app-build
+make app-deploy
+make app-status
+```
+
+이 경로에서는 `order-service`, `payment-service`, `websocket-service` 가 모두 `kafka` 네임스페이스 안에 배포되고, 각 파드는 `KAFKA_BOOTSTRAP_SERVERS=kafka-broker-headless.kafka.svc.cluster.local:9092` 로 브로커 전용 엔드포인트에 붙습니다.
+
+## k3s / Helm / Kafka 아키텍처 초안
+
+아래 다이어그램은 현재 저장소가 의도하는 **로컬 k3s 기반 운영 경로**를 요약한 초안입니다.
+
+```mermaid
+flowchart TB
+    Dev[Developer Machine]
+    Docker[Docker Desktop]
+    K3d[k3d Cluster]
+    Server[k3s Server Node]
+    Agent[k3s Agent Node]
+    Helm[Helm Release: Kafka]
+    Controller[Kafka Controller]
+    Broker[Kafka Broker]
+    PVC1[PVC: controller data]
+    PVC2[PVC: broker data]
+    LP[local-path StorageClass]
+
+    Dev --> Docker
+    Docker --> K3d
+    K3d --> Server
+    K3d --> Agent
+    Dev --> Helm
+    Helm --> Controller
+    Helm --> Broker
+    Controller --> PVC1
+    Broker --> PVC2
+    PVC1 --> LP
+    PVC2 --> LP
+```
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Make as make dev-up
+    participant Helm as Helm
+    participant K8s as k3s API
+    participant Kafka as Kafka Pods
+
+    Dev->>Make: make dev-up
+    Make->>Helm: helm upgrade --install kafka
+    Helm->>K8s: create namespace/service/statefulsets/pvc
+    K8s->>Kafka: schedule controller and broker
+    Kafka-->>Dev: kafka.kafka.svc.cluster.local:9092
+    Dev->>Make: make dev-status
+    Make->>K8s: kubectl get pods/services/pvc
+```
+
+```mermaid
+flowchart LR
+    OS[order-service]
+    PS[payment-service]
+    WS[websocket-service]
+    K[(Kafka ClusterIP Service)]
+    OC[order-created]
+    PC[payment-completed]
+
+    OS -->|publish| OC
+    OC --> K
+    K -->|consume| PS
+    PS -->|publish| PC
+    PC --> K
+    K -->|consume| WS
+```
+
+PlantUML 초안은 `docs/diagrams/` 아래에 함께 둡니다. README 에서는 GitHub 렌더링 호환성을 위해 Mermaid 를 우선 사용합니다.
+
 ## 테스트 전략
 
 현재 브랜치에서는 기능별로 다음 검증을 수행합니다.
@@ -197,6 +280,108 @@ make dev-topic-list
 ```bash
 ./gradlew test
 ```
+
+## AI 코드리뷰 자동화
+
+PR이 열리거나 커밋이 추가되면 GitHub Actions가 자동으로 diff를 분석하여 코드리뷰 코멘트를 PR에 게시합니다.
+
+### 전체 흐름
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GH as GitHub
+    participant Actions as GitHub Actions
+    participant Models as GitHub Models (GPT-4o)
+    participant PR as Pull Request
+
+    Dev->>GH: git push (feature branch)
+    Dev->>GH: PR open / push to open PR
+    GH->>Actions: pull_request 이벤트 트리거
+    Actions->>Actions: git diff (base..head) 추출
+    Actions->>Actions: Java·YAML·Gradle 파일만 필터링
+    Actions->>Models: diff + 리뷰 프롬프트 전송
+    Models-->>Actions: 코드리뷰 마크다운 반환
+    Actions->>PR: 코멘트 게시 (또는 기존 코멘트 업데이트)
+    PR-->>Dev: 리뷰 알림 수신
+```
+
+### 리뷰 포맷
+
+| 섹션 | 설명 |
+|------|------|
+| ✅ **잘된 점** | 잘 작성된 부분을 구체적으로 언급 |
+| 🔧 **개선 제안** | P1(Blocker) ~ P5(Nit) 우선순위로 제안 |
+| ❓ **질문** | 의도가 궁금한 부분을 존댓말로 질문 |
+
+**우선순위 기준:**
+
+| 레벨 | 기준 | 예시 |
+|------|------|------|
+| P1 Blocker | 머지 전 반드시 수정 | 보안 취약점, 데이터 손실 위험 |
+| P2 Critical | 머지 전 강하게 권장 | 테스트 미커버, 회귀 위험 |
+| P3 Major | 후속 PR 수정 | 성능·가독성에 큰 영향 |
+| P4 Minor | 선택 사항 | 변수명, 주석, 작은 리팩토링 |
+| P5 Nit | 단순 의견 | 오타, 여백 |
+
+### 관련 파일
+
+```text
+.github/
+└── workflows/
+    └── ai-code-review.yml   ← Actions 트리거 및 권한 정의
+scripts/
+└── ai-review/
+    ├── review.py            ← diff 추출 · GitHub Models 호출 · 코멘트 게시
+    └── requirements.txt     ← openai SDK (GitHub Models 호환 엔드포인트)
+```
+
+### 동작 조건
+
+- PR 이벤트: `opened` · `synchronize` · `reopened`
+- 리뷰 대상 파일: `.java` · `.kt` · `.yaml` · `.yml` · `.gradle` · `.properties`
+- 인증: `GITHUB_TOKEN` (별도 API 키 불필요, `models: read` 권한으로 GitHub Models 사용)
+- 동일 PR에 재push 시 기존 리뷰 코멘트를 **업데이트** (중복 방지)
+
+### 환경별 적용 전략 비교
+
+> "왜 토이프로젝트에서는 GitHub Actions를 썼고, 업무환경에서는 Claude Skills를 쓰나요?"
+> → 차이는 **무료/유료가 아니라 자동화 수준과 실행 위치**입니다.
+
+| 항목 | 토이프로젝트<br>(GitHub Actions + GitHub Models) | 업무환경<br>(Claude Code Skills + Jenkins) |
+|------|---|---|
+| **트리거** | PR 이벤트 → 완전 자동 | 개발자가 `/pr-review` 직접 입력 → 반자동 |
+| **실행 위치** | GitHub Actions 클라우드 | 로컬 Claude Code 세션 |
+| **AI 모델** | GPT-4o (GitHub Models) | Claude Sonnet / Opus |
+| **인증** | `GITHUB_TOKEN` (무료, 추가 계정 불필요) | Claude Code Pro / Team 플랜 |
+| **CI 연동** | GitHub Actions workflow | Jenkins pipeline stage |
+| **팀 공유 방법** | `.github/workflows/*.yml` 커밋 | `.claude/skills/*.md` 커밋 |
+| **사람 개입** | 없음 | 있음 (명령어 입력) |
+| **컨텍스트 이해** | diff 텍스트만 전달 | Claude가 파일 직접 읽고 분석 가능 |
+| **적합한 상황** | PR마다 자동 리뷰가 필요한 경우 | 특정 PR을 깊게 리뷰하고 싶을 때 |
+
+```mermaid
+flowchart LR
+    subgraph 토이프로젝트["토이프로젝트 (GitHub Actions)"]
+        direction LR
+        A[git push] --> B[PR open]
+        B --> C[Actions 자동 트리거]
+        C --> D[GitHub Models GPT-4o]
+        D --> E[PR 코멘트 자동 게시]
+    end
+
+    subgraph 업무환경["업무환경 (Claude Skills + Jenkins)"]
+        direction LR
+        F[개발자] -->|/pr-review 입력| G[Claude Code 로컬]
+        G --> H[Claude Sonnet/Opus]
+        H --> I[리뷰 결과 출력 + PR 코멘트]
+        J[Jenkins] -->|pipeline stage| K[Claude API 호출]
+        K --> I
+    end
+```
+
+두 방식은 **상호 보완적**이며 함께 사용할 수 있습니다.
+로컬에서 `/pr-review`로 빠르게 확인 → PR push 후 Actions가 팀 공유용 리뷰 자동 게시.
 
 ## 단계별 로드맵
 
