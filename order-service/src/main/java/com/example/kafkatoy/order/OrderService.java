@@ -1,6 +1,8 @@
 package com.example.kafkatoy.order;
 
 import com.example.kafkatoy.contracts.OrderCreatedEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -9,14 +11,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class OrderService {
 
     private final OrderRepository orderRepository;
-    private final OrderEventPublisher orderEventPublisher;
+    private final OutboxRepository outboxRepository;
+    private final ObjectMapper objectMapper;
 
-    public OrderService(OrderRepository orderRepository, OrderEventPublisher orderEventPublisher) {
+    public OrderService(OrderRepository orderRepository, OutboxRepository outboxRepository,
+            ObjectMapper objectMapper) {
         this.orderRepository = orderRepository;
-        this.orderEventPublisher = orderEventPublisher;
+        this.outboxRepository = outboxRepository;
+        this.objectMapper = objectMapper;
     }
 
-    // TODO: Outbox Pattern 적용 전 — DB 저장 성공 후 Kafka 발행 실패 시 이벤트 유실 가능
     @Transactional
     public OrderCreateResponse create(OrderCreateRequest request) {
         String orderId = UUID.randomUUID().toString();
@@ -25,9 +29,17 @@ public class OrderService {
         orderRepository.save(order);
 
         OrderCreatedEvent event = OrderCreatedEvent.initial(orderId, request.userId());
-        orderEventPublisher.publish(event);
+        outboxRepository.save(OutboxEvent.pending(orderId, "ORDER_CREATED", serialize(event)));
 
         return new OrderCreateResponse(orderId, request.userId(), order.getStatus().name());
+    }
+
+    private String serialize(Object obj) {
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize event", e);
+        }
     }
 
     @Transactional
