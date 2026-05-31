@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: msa-lab-ingress
+  annotations:
+    # WebSocket 업그레이드 지원
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$request_uri"
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          # order-service: 주문 API
+          - path: /orders
+            pathType: Prefix
+            backend:
+              service:
+                name: order-service
+                port:
+                  number: 8081
+          # websocket-service: STOMP WebSocket + 테스트 페이지
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: websocket-service
+                port:
+                  number: 8083
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: websocket-service
+                port:
+                  number: 8083

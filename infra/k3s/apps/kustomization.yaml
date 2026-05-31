@@ -8,3 +8,4 @@ resources:
   - order-service.yaml
   - payment-service.yaml
   - websocket-service.yaml
+  - ingress.yaml
