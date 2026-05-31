@@ -3,6 +3,12 @@
 ## AI 행동 지침
 - 모든 구현 요청에 `karpathy-guidelines` 스킬을 적용한다.
 
+## 커밋 컨벤션
+- **원자적 커밋**: 하나의 커밋은 하나의 논리적 변경만 포함한다.
+- **프리픽스**: `docs`, `feat`, `fix`, `refactor` 사용.
+- **상세 메시지**: 프리픽스 뒤 본문/설명은 한국어로 작성한다.
+  - 예: `feat(step5): Actuator 헬스체크 + HTTP Probe 전환`
+
 ## 프로젝트 목적
 이벤트 드리븐 MSA 패턴을 단계별로 직접 구현하며 학습하는 토이 프로젝트.
 각 단계를 feature 브랜치에서 작업 → PR 생성(자동 코드 리뷰) → main 머지.
@@ -31,7 +37,7 @@ POST /orders
 | `event-contracts` | — | 공유 이벤트 레코드 (OrderCreatedEvent, PaymentCompletedEvent, PaymentFailedEvent) |
 | `order-service` | 8081 | 주문 생성/상태 관리, Outbox Pattern |
 | `payment-service` | 8082 | 결제 처리, DB 기반 멱등성 |
-| `websocket-service` | — | 미사용 (스캐폴딩만 존재) |
+| `websocket-service` | 8083 | 결제 결과 WebSocket STOMP 브로드캐스트 |
 
 ## 기술 스택
 - Java 21 + Spring Boot 3, Spring Data JPA, Spring Kafka
@@ -48,7 +54,7 @@ POST /orders
 - `PaymentRecord`: DB 기반 멱등성 (ConcurrentHashMap 대체)
 - `PaymentFailedEventPublisher` + `PaymentFailedEvent`: 재시도 소진 시 발행
 
-### Step 2 — Outbox Pattern (PR #3, feature/step2-outbox-pattern 브랜치, 미머지)
+### Step 2 — Outbox Pattern (PR #3, merged)
 - `OutboxEvent` JPA 엔티티: id, aggregateId, eventType, payload(TEXT), status(PENDING/PUBLISHED), createdAt, publishedAt
 - `OutboxRepository.findByStatusOrderByCreatedAtAsc()`
 - `OrderService.create()`: Order + OutboxEvent를 같은 @Transactional에서 저장
@@ -56,17 +62,31 @@ POST /orders
 - `OrderEventPublisher` 삭제 (직접 발행 방식 제거)
 - producer value-serializer → StringSerializer (payload가 이미 직렬화된 JSON string)
 
+### Step 3 — DLQ + k3s 운영 설정 (PR #4, merged)
+- DLQ: `DefaultErrorHandler` + `DeadLetterPublishingRecoverer` → `order-created.DLQ` 토픽
+- k3s 매니페스트: Deployment, Service, ConfigMap(KAFKA_BOOTSTRAP_SERVERS), tcpSocket Probe
+- `KafkaTopicConfig`: NewTopic Bean으로 토픽 파티션 3개 선언적 관리
+- order-service replicas=1 (Outbox poller 중복 방지, ShedLock 도입 전까지)
+- payment-service/websocket-service replicas=3 (Kafka 파티션 1:1 매핑)
+- Dockerfile: eclipse-temurin:21-jre 기반
+
+### Step 4 — WebSocket 실시간 알림 (PR #5, merged)
+- websocket-service: Spring WebSocket + STOMP 기반
+- `PaymentCompletedEventListener` / `PaymentFailedEventListener`: Kafka → WebSocket 브릿지
+- `PaymentUpdateBroadcaster`: `/topic/orders/{orderId}`로 결제 결과 브로드캐스트
+- StringDeserializer + ObjectMapper 역직렬화 방식
+- STOMP 브라우저 테스트 페이지 (`index.html`)
+
 ## 다음 단계 (예정)
 
-### Step 3 — DLQ + k3s 운영 설정
-- DLQ(Dead Letter Queue) 설정: 재시도 소진 후 별도 토픽으로 격리
-- k3s: Deployment, Service, ConfigMap, Secret, Liveness/Readiness Probe 매니페스트
-- 로그 수집 또는 메트릭 노출 고려
+### Step 5 — Spring Actuator + HTTP Probe + Ingress
+- 3개 서비스에 `spring-boot-starter-actuator` 추가
+- k3s Probe: tcpSocket → httpGet `/actuator/health` 전환
+- Ingress 리소스: websocket-service 외부 접근 + WebSocket upgrade 지원
 
-### AI 툴 추가 (Step 3 이후)
-- **이벤트 컨트랙트 변경 감지기** (우선순위 높음): event-contracts 변경 시 영향받는 컨슈머 목록 자동 탐지
-- CHANGELOG 자동 생성기
-- 테스트 커버리지 분석기
+### Step 6 — ShedLock + order-service 스케일아웃
+- ShedLock: DB 기반 분산 락으로 Outbox poller 중복 방지
+- order-service replicas=1 → 3 스케일아웃
 
 ## 브랜치 전략
 - `main`: 머지된 완성 코드
@@ -80,5 +100,8 @@ POST /orders
 - **EmbeddedKafka topics**: order-created, payment-completed, payment-failed 3개 모두 명시 필요
 
 ## 현재 PR 상태
-- PR #3 (`feature/step2-outbox-pattern`): 리뷰 대기 중 / 머지 전
-  - 머지 후 `feature/step3-dlq-k3s` 브랜치에서 Step 3 시작
+- PR #2 (Step 1): merged
+- PR #3 (Step 2): merged
+- PR #4 (Step 3): merged
+- PR #5 (Step 4): merged
+- 다음: `feature/step5-actuator-ingress` 브랜치에서 Step 5 시작
