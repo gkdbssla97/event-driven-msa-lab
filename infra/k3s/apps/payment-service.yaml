@@ -3,7 +3,8 @@ kind: Deployment
 metadata:
   name: payment-service
 spec:
-  replicas: 1
+  # replicas=3: Kafka 파티션 3개와 1:1 매핑 → pod당 1파티션 담당
+  replicas: 3
   selector:
     matchLabels:
       app: payment-service
@@ -20,7 +21,10 @@ spec:
             - containerPort: 8082
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: kafka-broker-headless.kafka.svc.cluster.local:9092
+              valueFrom:
+                configMapKeyRef:
+                  name: kafka-config
+                  key: bootstrap-servers
           resources:
             requests:
               cpu: "100m"

@@ -4,6 +4,7 @@ kind: Kustomization
 namespace: kafka
 
 resources:
+  - kafka-configmap.yaml
   - order-service.yaml
   - payment-service.yaml
   - websocket-service.yaml
