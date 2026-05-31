@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>주문 상태 실시간 알림</title>
+  <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; }
+    #log { border: 1px solid #ccc; padding: 12px; min-height: 120px; background: #f9f9f9; }
+    .CONFIRMED { color: #2a7a2a; font-weight: bold; }
+    .CANCELED  { color: #c0392b; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>주문 상태 실시간 알림 (STOMP)</h2>
+
+  <label>Order ID: <input id="orderId" value="test-order-1" style="width:200px"></label>
+  <button onclick="subscribe()">구독</button>
+  <button onclick="unsubscribe()">구독 해제</button>
+
+  <h3>수신 메시지</h3>
+  <div id="log"></div>
+
+  <script>
+    let client, subscription;
+
+    const client_ = new StompJs.Client({
+      brokerURL: 'ws://localhost:8083/ws',
+      reconnectDelay: 5000,
+      onConnect: () => log('연결됨', ''),
+      onDisconnect: () => log('연결 끊김', ''),
+    });
+    client = client_;
+    client.activate();
+
+    function subscribe() {
+      const orderId = document.getElementById('orderId').value.trim();
+      if (!orderId) return;
+      if (subscription) subscription.unsubscribe();
+      subscription = client.subscribe('/topic/orders/' + orderId, (msg) => {
+        const body = JSON.parse(msg.body);
+        log(body.status, JSON.stringify(body, null, 2));
+      });
+      log('구독 시작', '/topic/orders/' + orderId);
+    }
+
+    function unsubscribe() {
+      if (subscription) { subscription.unsubscribe(); log('구독 해제', ''); }
+    }
+
+    function log(status, detail) {
+      const div = document.getElementById('log');
+      const line = document.createElement('p');
+      line.className = status;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${status} ${detail}`;
+      div.prepend(line);
+    }
+  </script>
+</body>
+</html>
