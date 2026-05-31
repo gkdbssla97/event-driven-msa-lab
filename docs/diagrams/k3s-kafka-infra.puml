@@ -1,0 +1,32 @@
+@startuml
+title Local k3s + Helm + Kafka Infrastructure
+
+skinparam componentStyle rectangle
+
+node "Developer Machine" {
+  component "Docker Desktop" as Docker
+  component "k3d Cluster" as K3d
+}
+
+node "k3s Cluster" {
+  node "Server Node" as Server
+  node "Agent Node" as Agent
+  component "Helm Release\nKafka" as HelmRelease
+  component "Kafka Controller" as Controller
+  component "Kafka Broker" as Broker
+  database "PVC\ncontroller" as PvcController
+  database "PVC\nbroker" as PvcBroker
+  database "local-path\nStorageClass" as LocalPath
+}
+
+Docker --> K3d
+K3d --> Server
+K3d --> Agent
+HelmRelease --> Controller
+HelmRelease --> Broker
+Controller --> PvcController
+Broker --> PvcBroker
+PvcController --> LocalPath
+PvcBroker --> LocalPath
+
+@enduml

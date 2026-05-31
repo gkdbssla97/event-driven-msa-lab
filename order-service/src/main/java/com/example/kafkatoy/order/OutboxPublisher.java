@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 @Component
 public class OutboxPublisher {
@@ -28,14 +27,19 @@ public class OutboxPublisher {
     }
 
     @Scheduled(fixedDelayString = "${app.outbox.poll-interval-ms:1000}")
-    @Transactional
     public void publishPending() {
         outboxRepository.findByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING).forEach(event -> {
-            kafkaTemplate.send(orderCreatedTopic, event.getAggregateId(), event.getPayload());
-            event.markPublished();
-            outboxRepository.save(event);
-            log.info("Published outbox event: id={}, type={}, aggregateId={}",
-                    event.getId(), event.getEventType(), event.getAggregateId());
+            kafkaTemplate.send(orderCreatedTopic, event.getAggregateId(), event.getPayload())
+                    .whenComplete((result, ex) -> {
+                        if (ex != null) {
+                            log.error("Failed to publish outbox event: id={}, error={}", event.getId(), ex.getMessage());
+                            return;
+                        }
+                        event.markPublished();
+                        outboxRepository.save(event);
+                        log.info("Published outbox event: id={}, type={}, aggregateId={}",
+                                event.getId(), event.getEventType(), event.getAggregateId());
+                    });
         });
     }
 }

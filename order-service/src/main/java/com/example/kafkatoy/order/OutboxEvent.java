@@ -41,6 +41,9 @@ public class OutboxEvent {
     }
 
     public void markPublished() {
+        if (this.status != OutboxStatus.PENDING) {
+            throw new IllegalStateException("Cannot publish OutboxEvent in status: " + this.status);
+        }
         this.status = OutboxStatus.PUBLISHED;
         this.publishedAt = Instant.now();
     }

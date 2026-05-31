@@ -1,5 +1,8 @@
 # CLAUDE.md — event-driven-msa-lab
 
+## AI 행동 지침
+- 모든 구현 요청에 `karpathy-guidelines` 스킬을 적용한다.
+
 ## 프로젝트 목적
 이벤트 드리븐 MSA 패턴을 단계별로 직접 구현하며 학습하는 토이 프로젝트.
 각 단계를 feature 브랜치에서 작업 → PR 생성(자동 코드 리뷰) → main 머지.

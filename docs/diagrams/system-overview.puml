@@ -1,0 +1,24 @@
+@startuml
+title Event-Driven MSA Lab - System Overview
+
+skinparam componentStyle rectangle
+
+actor Client
+
+package "Application Layer" {
+  [Order Service] as Order
+  [Payment Service] as Payment
+  [WebSocket Service] as WebSocket
+}
+
+queue "Kafka\norder-created" as OrderTopic
+queue "Kafka\npayment-completed" as PaymentTopic
+
+Client --> Order : POST /orders
+Order --> OrderTopic : publish
+OrderTopic --> Payment : consume
+Payment --> PaymentTopic : publish
+PaymentTopic --> WebSocket : consume
+WebSocket --> Client : /topic/payments/{userId}
+
+@enduml
