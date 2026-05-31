@@ -1,0 +1,18 @@
+@startuml
+title make dev-up Sequence
+
+actor Developer
+participant "make dev-up" as Make
+participant "scripts/dev/up.sh" as Script
+participant Helm
+participant "k3s API" as K8s
+participant "Kafka Pods" as Kafka
+
+Developer -> Make : make dev-up
+Make -> Script : bash scripts/dev/up.sh
+Script -> Helm : helm upgrade --install kafka
+Helm -> K8s : create namespace + release resources
+K8s -> Kafka : schedule controller and broker
+Kafka --> Developer : kafka.kafka.svc.cluster.local:9092
+
+@enduml

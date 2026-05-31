@@ -33,3 +33,4 @@ app:
       order-created: order-created
       payment-completed: payment-completed
       payment-failed: payment-failed
+      order-created-dlq: order-created.DLQ
