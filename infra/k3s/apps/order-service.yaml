@@ -3,9 +3,9 @@ kind: Deployment
 metadata:
   name: order-service
 spec:
-  # replicas=1 고정: Outbox poller가 중복 발행을 막으려면 분산 락(ShedLock) 필요.
-  # 스케일아웃은 Step 5에서 @SchedulerLock 도입 후 진행.
-  replicas: 1
+  # replicas=3: ShedLock(@SchedulerLock)으로 Outbox poller 분산 락 확보.
+  # 동시에 1개 파드만 폴링하므로 중복 발행 없음.
+  replicas: 3
   selector:
     matchLabels:
       app: order-service
