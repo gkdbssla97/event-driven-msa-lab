@@ -3,11 +3,9 @@ kind: Ingress
 metadata:
   name: msa-lab-ingress
   annotations:
-    # WebSocket 업그레이드 지원
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
-    nginx.ingress.kubernetes.io/upstream-hash-by: "$request_uri"
+    # Traefik: WebSocket은 기본 지원 (별도 annotation 불필요)
+    # 커스텀 미들웨어가 필요하면 traefik.ingress.kubernetes.io/router.middlewares 사용
+    traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
   ingressClassName: traefik
   rules:
@@ -29,6 +27,8 @@ spec:
                 name: websocket-service
                 port:
                   number: 8083
+          # websocket-service: STOMP 테스트 페이지 (index.html)
+          # Exact 매칭이므로 /orders, /ws 등 다른 Prefix 경로와 충돌하지 않음
           - path: /
             pathType: Exact
             backend:
