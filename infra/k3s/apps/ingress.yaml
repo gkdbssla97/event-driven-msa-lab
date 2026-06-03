@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: msa-lab-ingress
+  annotations:
+    # Traefik: WebSocket은 기본 지원 (별도 annotation 불필요)
+    # 커스텀 미들웨어가 필요하면 traefik.ingress.kubernetes.io/router.middlewares 사용
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          # order-service: 주문 API
+          - path: /orders
+            pathType: Prefix
+            backend:
+              service:
+                name: order-service
+                port:
+                  number: 8081
+          # websocket-service: STOMP WebSocket + 테스트 페이지
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: websocket-service
+                port:
+                  number: 8083
+          # websocket-service: STOMP 테스트 페이지 (index.html)
+          # Exact 매칭이므로 /orders, /ws 등 다른 Prefix 경로와 충돌하지 않음
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: websocket-service
+                port:
+                  number: 8083
