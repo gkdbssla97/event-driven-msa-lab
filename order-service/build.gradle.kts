@@ -10,6 +10,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.kafka:spring-kafka")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("net.javacrumbs.shedlock:shedlock-spring:6.3.1")
+    implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.3.1")
     runtimeOnly("com.h2database:h2")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")

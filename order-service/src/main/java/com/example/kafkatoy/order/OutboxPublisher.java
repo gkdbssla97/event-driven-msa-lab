@@ -1,5 +1,6 @@
 package com.example.kafkatoy.order;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +28,7 @@ public class OutboxPublisher {
     }
 
     @Scheduled(fixedDelayString = "${app.outbox.poll-interval-ms:1000}")
+    @SchedulerLock(name = "outbox-publisher", lockAtLeastFor = "PT1S", lockAtMostFor = "PT30S")
     public void publishPending() {
         outboxRepository.findByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING).forEach(event -> {
             kafkaTemplate.send(orderCreatedTopic, event.getAggregateId(), event.getPayload())
