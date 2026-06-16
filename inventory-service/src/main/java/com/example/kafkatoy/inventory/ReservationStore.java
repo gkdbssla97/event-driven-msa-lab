@@ -1,0 +1,44 @@
+package com.example.kafkatoy.inventory;
+
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Component;
+
+import java.time.Duration;
+import java.util.Optional;
+
+/**
+ * 재고 예약 내역을 Redis에 저장한다.
+ * 보상 트랜잭션(payment-failed) 수신 시 orderId로 예약 정보를 조회하여 재고를 복원하는 데 사용된다.
+ * key: reservation:{orderId}  value: "{productId}:{quantity}"
+ */
+@Component
+public class ReservationStore {
+
+    private static final Duration TTL = Duration.ofHours(24);
+    private final StringRedisTemplate redisTemplate;
+
+    public ReservationStore(StringRedisTemplate redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
+
+    public void save(String orderId, String productId, int quantity) {
+        redisTemplate.opsForValue().set(key(orderId), productId + ":" + quantity, TTL);
+    }
+
+    public Optional<Reservation> find(String orderId) {
+        String value = redisTemplate.opsForValue().get(key(orderId));
+        if (value == null) return Optional.empty();
+        String[] parts = value.split(":", 2);
+        return Optional.of(new Reservation(parts[0], Integer.parseInt(parts[1])));
+    }
+
+    public void remove(String orderId) {
+        redisTemplate.delete(key(orderId));
+    }
+
+    private String key(String orderId) {
+        return "reservation:" + orderId;
+    }
+
+    public record Reservation(String productId, int quantity) {}
+}

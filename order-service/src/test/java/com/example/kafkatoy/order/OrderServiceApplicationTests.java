@@ -26,7 +26,11 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
-@EmbeddedKafka(partitions = 1, topics = {"order-created", "payment-completed", "payment-failed"}, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
+@EmbeddedKafka(
+        partitions = 1,
+        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed"},
+        bootstrapServersProperty = "spring.kafka.bootstrap-servers"
+)
 class OrderServiceApplicationTests {
 
     @Autowired
@@ -45,7 +49,9 @@ class OrderServiceApplicationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  \"userId\": \"user-1\"
+                                  "userId": "user-1",
+                                  "productId": "product-A",
+                                  "quantity": 2
                                 }
                                 """))
                 .andExpect(status().isAccepted())
@@ -59,6 +65,8 @@ class OrderServiceApplicationTests {
         OrderCreatedEvent event = KafkaTestUtils.getSingleRecord(consumer, "order-created", Duration.ofSeconds(10)).value();
 
         assertThat(event.userId()).isEqualTo("user-1");
+        assertThat(event.productId()).isEqualTo("product-A");
+        assertThat(event.quantity()).isEqualTo(2);
         assertThat(event.orderId()).isNotBlank();
         assertThat(event.eventType()).isEqualTo("ORDER_CREATED");
     }
@@ -69,7 +77,9 @@ class OrderServiceApplicationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "userId": ""
+                                  "userId": "",
+                                  "productId": "product-A",
+                                  "quantity": 1
                                 }
                                 """))
                 .andExpect(status().isBadRequest());

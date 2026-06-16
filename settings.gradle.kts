@@ -5,4 +5,5 @@ include(
     "order-service",
     "payment-service",
     "websocket-service",
+    "inventory-service",
 )

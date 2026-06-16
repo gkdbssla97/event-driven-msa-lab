@@ -2,7 +2,7 @@ package com.example.kafkatoy.payment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.kafkatoy.contracts.OrderCreatedEvent;
+import com.example.kafkatoy.contracts.InventoryReservedEvent;
 import com.example.kafkatoy.contracts.PaymentCompletedEvent;
 import java.time.Duration;
 import java.util.Map;
@@ -23,7 +23,7 @@ import org.springframework.kafka.test.utils.KafkaTestUtils;
 @SpringBootTest(webEnvironment = WebEnvironment.NONE)
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"order-created", "payment-completed"},
+        topics = {"inventory-reserved", "payment-completed", "payment-failed"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 class PaymentServiceApplicationTests {
@@ -39,9 +39,9 @@ class PaymentServiceApplicationTests {
     }
 
     @Test
-    void consumesOrderCreatedAndPublishesPaymentCompleted() {
-        OrderCreatedEvent source = OrderCreatedEvent.initial("order-1", "user-1");
-        kafkaTemplate.send("order-created", source.orderId(), source);
+    void consumesInventoryReservedAndPublishesPaymentCompleted() throws Exception {
+        InventoryReservedEvent source = InventoryReservedEvent.of("order-1", "user-1", "product-A", 2);
+        kafkaTemplate.send("inventory-reserved", source.orderId(), source);
 
         Consumer<String, PaymentCompletedEvent> consumer = createConsumer();
         embeddedKafkaBroker.consumeFromAnEmbeddedTopic(consumer, "payment-completed");

@@ -1,37 +1,23 @@
 spring:
   application:
-    name: order-service
-  datasource:
-    url: jdbc:h2:mem:orderdb;DB_CLOSE_DELAY=-1
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
-  jpa:
-    hibernate:
-      ddl-auto: create-drop
-    show-sql: false
-    properties:
-      hibernate.format_sql: true
-    defer-datasource-initialization: true
-  sql:
-    init:
-      mode: always
-  h2:
-    console:
-      enabled: true
+    name: inventory-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
     consumer:
-      group-id: order-service
+      group-id: inventory-service
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
 server:
-  port: 8081
+  port: 8083
 
 management:
   endpoints:
@@ -47,12 +33,15 @@ management:
         liveness:
           include: livenessState
         readiness:
-          include: readinessState, db
+          include: readinessState
 
 app:
   kafka:
     topics:
       order-created: order-created
-      payment-completed: payment-completed
       payment-failed: payment-failed
+      inventory-reserved: inventory-reserved
       inventory-failed: inventory-failed
+      order-created-dlq: order-created.DLQ
+  inventory:
+    initial-stock: 100
