@@ -7,7 +7,10 @@ import urllib.error
 from openai import OpenAI
 
 REVIEW_EXTENSIONS = {'.java', '.kt', '.groovy', '.yaml', '.yml', '.gradle', '.properties'}
-MAX_DIFF_CHARS = 48_000
+# gpt-4o (GitHub Models 무료 등급)는 요청당 8000 토큰 한도.
+# 시스템 프롬프트(~700 토큰) + 응답(1500 토큰)을 제외하고 diff에 쓸 수 있는 여유를 보수적으로 잡음.
+# 코드 diff 기준 1 토큰 ≈ 3자로 추정 → 12,000자 ≈ 4000토큰
+MAX_DIFF_CHARS = 12_000
 
 SYSTEM_PROMPT = """당신은 Java/Spring Boot 기반 이벤트 드리븐 MSA에 정통한 시니어 코드 리뷰어입니다.
 PR diff를 분석하여 아래 형식으로 한국어 코드리뷰를 작성하세요.
@@ -72,7 +75,7 @@ def call_github_models(diff: str) -> str:
             {'role': 'system', 'content': SYSTEM_PROMPT},
             {'role': 'user', 'content': f'아래 PR diff를 리뷰해주세요:\n\n```diff\n{diff}\n```'},
         ],
-        max_tokens=4096,
+        max_tokens=1500,
     )
     return response.choices[0].message.content
 
