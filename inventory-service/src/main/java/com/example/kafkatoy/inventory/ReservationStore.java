@@ -4,7 +4,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.Optional;
 
 /**
  * 재고 예약 내역을 Redis에 저장한다.
@@ -23,17 +22,6 @@ public class ReservationStore {
 
     public void save(String orderId, String productId, int quantity) {
         redisTemplate.opsForValue().set(key(orderId), productId + ":" + quantity, TTL);
-    }
-
-    public Optional<Reservation> find(String orderId) {
-        String value = redisTemplate.opsForValue().get(key(orderId));
-        if (value == null) return Optional.empty();
-        String[] parts = value.split(":", 2);
-        return Optional.of(new Reservation(parts[0], Integer.parseInt(parts[1])));
-    }
-
-    public void remove(String orderId) {
-        redisTemplate.delete(key(orderId));
     }
 
     private String key(String orderId) {

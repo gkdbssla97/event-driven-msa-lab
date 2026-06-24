@@ -8,6 +8,7 @@ import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class InventoryService {
@@ -25,9 +26,22 @@ public class InventoryService {
             return redis.call('DECRBY', KEYS[1], ARGV[1])
             """, Long.class);
 
-    private static final RedisScript<Long> RELEASE_SCRIPT = RedisScript.of("""
-            return redis.call('INCRBY', KEYS[1], ARGV[1])
-            """, Long.class);
+    // KEYS[1] = reservation:{orderId}
+    // 예약 조회(GET) + 재고 복원(INCRBY) + 예약 삭제(DEL)를 단일 원자적 명령으로 실행.
+    // INCRBY 성공 후 DEL 실패로 예약이 남는 경우를 방지 (재전달 시 중복 복원 방지).
+    // 예약이 없으면(이미 처리됨) nil 반환.
+    private static final RedisScript<List> COMPENSATE_SCRIPT = RedisScript.of("""
+            local reservation = redis.call('GET', KEYS[1])
+            if not reservation then
+                return nil
+            end
+            local sep = string.find(reservation, ':')
+            local productId = string.sub(reservation, 1, sep - 1)
+            local quantity = string.sub(reservation, sep + 1)
+            redis.call('INCRBY', 'inventory:' .. productId, tonumber(quantity))
+            redis.call('DEL', KEYS[1])
+            return {productId, quantity}
+            """, List.class);
 
     private final StringRedisTemplate redisTemplate;
     private final ReservationStore reservationStore;
@@ -62,12 +76,24 @@ public class InventoryService {
     }
 
     /**
-     * 결제 실패 시 보상 트랜잭션으로 재고를 복원한다.
+     * 보상 트랜잭션을 원자적으로 수행한다 (예약 조회 + 재고 복원 + 예약 삭제).
+     * 재고 복원과 예약 키 삭제가 단일 Redis 명령으로 실행되므로, 둘 중 하나만
+     * 적용되는 부분 실패 상태가 발생할 수 없다 — 이벤트가 재전달되어도 예약이
+     * 이미 삭제되어 있으면 재복원이 일어나지 않는다.
+     *
+     * @return 복원된 productId/quantity, 이미 처리되어 예약이 없으면 empty
      */
-    public void release(String productId, int quantity) {
-        String key = stockKey(productId);
-        Long stock = redisTemplate.execute(RELEASE_SCRIPT, List.of(key), String.valueOf(quantity));
-        log.info("Stock released (compensation): productId={}, quantity={}, current={}", productId, quantity, stock);
+    @SuppressWarnings("unchecked")
+    public Optional<ReservationStore.Reservation> compensate(String orderId) {
+        String key = "reservation:" + orderId;
+        List<String> result = redisTemplate.execute(COMPENSATE_SCRIPT, List.of(key));
+        if (result == null) {
+            return Optional.empty();
+        }
+        String productId = result.get(0);
+        int quantity = Integer.parseInt(result.get(1));
+        log.info("Compensation complete (atomic): orderId={}, productId={}, quantity={}", orderId, productId, quantity);
+        return Optional.of(new ReservationStore.Reservation(productId, quantity));
     }
 
     public long getStock(String productId) {
