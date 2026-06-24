@@ -28,7 +28,7 @@ public class OrderService {
         Order order = Order.create(orderId, request.userId());
         orderRepository.save(order);
 
-        OrderCreatedEvent event = OrderCreatedEvent.initial(orderId, request.userId());
+        OrderCreatedEvent event = OrderCreatedEvent.initial(orderId, request.userId(), request.productId(), request.quantity());
         outboxRepository.save(OutboxEvent.pending(orderId, "ORDER_CREATED", serialize(event)));
 
         return new OrderCreateResponse(orderId, request.userId(), order.getStatus().name());

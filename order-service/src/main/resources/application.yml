@@ -47,7 +47,7 @@ management:
         liveness:
           include: livenessState
         readiness:
-          include: readinessState, db, kafka
+          include: readinessState, db
 
 app:
   kafka:
@@ -55,3 +55,4 @@ app:
       order-created: order-created
       payment-completed: payment-completed
       payment-failed: payment-failed
+      inventory-failed: inventory-failed

@@ -1,13 +1,20 @@
 spring:
   application:
-    name: websocket-service
+    name: inventory-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
-      group-id: websocket-service
+      group-id: inventory-service
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
 server:
   port: 8083
@@ -31,9 +38,10 @@ management:
 app:
   kafka:
     topics:
-      payment-completed: payment-completed
+      order-created: order-created
       payment-failed: payment-failed
-  websocket:
-    allowed-origin-patterns:
-      - http://localhost:*
-      - http://127.0.0.1:*
+      inventory-reserved: inventory-reserved
+      inventory-failed: inventory-failed
+      order-created-dlq: order-created.DLQ
+  inventory:
+    initial-stock: 100

@@ -9,7 +9,7 @@ class OrderCreatedEventTest {
 
     @Test
     void initialFactoryCreatesExpectedEventType() {
-        OrderCreatedEvent event = OrderCreatedEvent.initial("order-1", "user-1");
+        OrderCreatedEvent event = OrderCreatedEvent.initial("order-1", "user-1", "product-A", 1);
 
         assertEquals("ORDER_CREATED", event.eventType());
         assertEquals("order-1", event.orderId());

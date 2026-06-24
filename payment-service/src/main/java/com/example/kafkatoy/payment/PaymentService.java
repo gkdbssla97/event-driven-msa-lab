@@ -1,6 +1,6 @@
 package com.example.kafkatoy.payment;
 
-import com.example.kafkatoy.contracts.OrderCreatedEvent;
+import com.example.kafkatoy.contracts.InventoryReservedEvent;
 import com.example.kafkatoy.contracts.PaymentCompletedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +19,7 @@ public class PaymentService {
     }
 
     @Transactional
-    public PaymentCompletedEvent process(OrderCreatedEvent event) {
+    public PaymentCompletedEvent process(InventoryReservedEvent event) {
         String orderId = event.orderId();
 
         if (paymentRepository.existsById(orderId)) {
