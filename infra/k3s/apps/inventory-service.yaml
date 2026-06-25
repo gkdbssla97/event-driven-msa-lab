@@ -17,7 +17,7 @@ spec:
           image: event-driven-msa-lab/inventory-service:dev
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8083
+            - containerPort: 8084
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               valueFrom:
@@ -38,14 +38,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: 8083
+              port: 8084
             initialDelaySeconds: 120
             periodSeconds: 10
             failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: 8083
+              port: 8084
             initialDelaySeconds: 90
             periodSeconds: 5
             failureThreshold: 5
@@ -59,5 +59,5 @@ spec:
     app: inventory-service
   ports:
     - name: http
-      port: 8083
-      targetPort: 8083
+      port: 8084
+      targetPort: 8084

@@ -1,281 +1,118 @@
 # event-driven-msa-lab
 
-Kafka, Kubernetes, Redis, WebSocket 기반 이벤트 드리븐 아키텍처를 **단계적으로 직접 구축해보는 실습형 모노레포**입니다.
+Kafka 기반 이벤트 드리븐 MSA에서 실제로 마주치는 분산 시스템 문제들 — **데이터 정합성, 중복 처리, 분산 트랜잭션** — 을 단계별로 직접 구현하며 해결한 실습형 프로젝트입니다.
 
-이 프로젝트의 목적은 단순 CRUD 가 아니라, 작은 범위 안에서 아래 흐름을 실제로 만들어보는 것입니다.
+단순 CRUD가 아니라, "서비스가 여러 개로 쪼개지면 생기는 진짜 문제"를 의도적으로 만들고 패턴으로 해결하는 것이 목표입니다.
 
-- 서비스 간 직접 호출 없이 이벤트로 연결하기
-- 비동기 흐름을 코드 구조로 분리하기
-- 결제 완료 상태를 실시간으로 전달하기
-- 이후 Outbox, Retry, Idempotency, Redis 같은 실무 패턴을 자연스럽게 확장하기
+- DB 저장과 메시지 발행을 어떻게 원자적으로 묶을 것인가 → **Outbox 패턴**
+- 메시지가 중복으로 와도 비즈니스 로직이 한 번만 실행되게 하려면 → **멱등성(Idempotency)**
+- 처리할 수 없는 메시지를 무한 재시도하지 않으려면 → **DLQ (Dead Letter Queue)**
+- 여러 인스턴스가 동시에 폴링해도 중복 발행이 안 되려면 → **분산 락 (ShedLock)**
+- RDB(주문/결제)와 NoSQL(Redis 재고)에 걸친 트랜잭션을 2PC 없이 처리하려면 → **Choreography Saga + 보상 트랜잭션**
 
-## 현재 상태
-
-현재 브랜치는 **Phase 2 기준의 기본 이벤트 흐름 코드**를 포함합니다.
-
-- `order-service`: 주문 생성 API와 `order-created` 발행
-- `payment-service`: `order-created` 소비 후 `payment-completed` 발행
-- `websocket-service`: `payment-completed` 소비 후 WebSocket 브로드캐스트
-- `event-contracts`: 서비스 간 공유 이벤트 계약
-- Embedded Kafka 기반 테스트로 각 슬라이스 검증
-
-아직 구현하지 않은 범위는 의도적으로 남겨두었습니다.
-
-- DB 영속화
-- Outbox Pattern
-- Retry / DLQ 전략
-- Idempotency
-- Redis 기반 replay 방지 및 캐시
-- 애플리케이션의 k3s 실제 배포 매니페스트
-
-## 아키텍처 개요
+## 한눈에 보는 이벤트 흐름
 
 ```mermaid
-flowchart LR
-    Client[Client]
-    Order[Order Service]
-    Kafka1[(Kafka\norder-created)]
-    Payment[Payment Service]
-    Kafka2[(Kafka\npayment-completed)]
-    WebSocket[WebSocket Service]
-    Realtime[Realtime Update]
+flowchart TB
+    Client[Client] -->|POST /orders| Order[order-service]
+    Order -->|Outbox 폴링 발행| OC([order-created])
+    OC --> Inventory[inventory-service<br/>Redis 재고 차감]
 
-    Client --> Order
-    Order --> Kafka1
-    Kafka1 --> Payment
-    Payment --> Kafka2
-    Kafka2 --> WebSocket
-    WebSocket --> Realtime
+    Inventory -->|재고 충분| IR([inventory-reserved])
+    Inventory -->|재고 부족| IF([inventory-failed])
+
+    IR --> Payment[payment-service<br/>결제 처리 + 멱등성]
+    Payment -->|성공| PC([payment-completed])
+    Payment -->|실패| PF([payment-failed])
+
+    IF --> Order2[order-service: CANCELED]
+    PC --> Order3[order-service: CONFIRMED]
+    PF --> Order4[order-service: CANCELED]
+    PF -->|보상 트랜잭션| Inventory2[inventory-service<br/>Redis 재고 복원]
+
+    PC --> WS[websocket-service]
+    PF --> WS
+    WS -->|STOMP| Browser[Browser]
 ```
 
-## 이벤트 시퀀스
+**Choreography Saga**: 중앙 오케스트레이터 없이, 각 서비스가 이벤트를 듣고 자기 일을 한 뒤 다음 이벤트를 발행합니다. 결제가 실패하면 `payment-failed` 이벤트를 inventory-service가 받아서 **이미 차감한 재고를 다시 복원**하는 보상 트랜잭션을 수행합니다.
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant O as Order Service
-    participant K as Kafka
-    participant P as Payment Service
-    participant W as WebSocket Service
+## 구현된 패턴과 위치
 
-    C->>O: POST /orders
-    O->>K: publish order-created
-    K->>P: consume order-created
-    P->>K: publish payment-completed
-    K->>W: consume payment-completed
-    W-->>C: /topic/payments/{userId}
-```
+| 패턴 | 문제 | 구현 위치 |
+|---|---|---|
+| **Outbox** | RDB 저장과 Kafka 발행의 원자성 | [`OutboxEvent`](order-service/src/main/java/com/example/kafkatoy/order/OutboxEvent.java), [`OutboxPublisher`](order-service/src/main/java/com/example/kafkatoy/order/OutboxPublisher.java) |
+| **멱등성** | Kafka at-least-once로 인한 중복 처리 | [`PaymentService.process()`](payment-service/src/main/java/com/example/kafkatoy/payment/PaymentService.java) — `existsById` 체크 |
+| **DLQ** | 처리 불가 메시지의 무한 재시도 방지 | [`KafkaConsumerConfig`](payment-service/src/main/java/com/example/kafkatoy/payment/KafkaConsumerConfig.java) — `DefaultErrorHandler` + `DeadLetterPublishingRecoverer` |
+| **분산 락 (ShedLock)** | 여러 인스턴스의 Outbox 폴링 중복 실행 | [`ShedLockConfig`](order-service/src/main/java/com/example/kafkatoy/order/ShedLockConfig.java) |
+| **Saga + 보상 트랜잭션** | RDB/Redis에 걸친 분산 트랜잭션 | [`InventoryService.reserve()/compensate()`](inventory-service/src/main/java/com/example/kafkatoy/inventory/InventoryService.java) — Lua 스크립트로 원자적 재고 차감/복원 |
+| **실시간 알림** | 비동기 처리 결과를 클라이언트에 전달 | [`websocket-service`](websocket-service) — Spring WebSocket + STOMP |
+| **Actuator Probe** | k8s readiness/liveness로 안전한 롤링 배포 | 각 서비스 `application.yml` + `infra/k3s/apps/*.yaml` |
+
+> 보상 트랜잭션의 원자성 버그(재고 복원과 예약 삭제가 부분 실패할 수 있던 문제)를 코드리뷰로 발견하고 Lua 스크립트로 고친 과정은 [`docs/blog-idempotency-and-outbox.md`](docs/blog-idempotency-and-outbox.md)에 정리했습니다.
 
 ## 모듈 구조
 
 ```text
 event-driven-msa-lab
-├── event-contracts
+├── event-contracts      # 서비스 간 공유 이벤트 계약 (비즈니스 로직 없음)
+├── order-service         # 주문 생성, 상태 관리, Outbox 발행
+├── inventory-service     # Redis 기반 재고 관리, 보상 트랜잭션
+├── payment-service       # 결제 처리, DB 기반 멱등성
+├── websocket-service     # 결제 결과 실시간 브로드캐스트 (STOMP)
 ├── infra
-│   ├── k3s
-│   └── kafka
-├── order-service
-├── payment-service
-├── scripts
-│   └── dev
-└── websocket-service
+│   ├── k3s/apps          # kustomize 기반 k8s 매니페스트
+│   └── kafka             # Kafka Helm values
+└── scripts/ai-review     # PR 자동 코드리뷰 (GitHub Actions + GitHub Models)
 ```
 
-### `event-contracts`
-
-서비스 간에 공유하는 이벤트 계약 모듈입니다.
-
-- `DomainEvent`
-- `OrderCreatedEvent`
-- `PaymentCompletedEvent`
-
-이 모듈은 **비즈니스 로직 없이 계약만 유지**하는 것이 원칙입니다.
-
-### `order-service`
-
-주문 생성 HTTP 진입점입니다.
-
-- `POST /orders`
-- 주문 ID 생성
-- `order-created` 이벤트 발행
-
-### `payment-service`
-
-주문 생성 이벤트를 소비해서 결제 완료 이벤트로 변환하는 서비스입니다.
-
-- `@KafkaListener` 로 `order-created` 소비
-- mock 결제 처리
-- `payment-completed` 발행
-
-### `websocket-service`
-
-결제 완료 이벤트를 실시간 채널로 릴레이하는 서비스입니다.
-
-- `@KafkaListener` 로 `payment-completed` 소비
-- STOMP/WebSocket endpoint `/ws`
-- 사용자별로 보이도록 분리된 destination `/topic/payments/{userId}` 로 브로드캐스트
-
-> 주의: 현재 Phase 2 구현은 **인증/인가가 없는 데모용 WebSocket 채널**입니다. 즉, destination 경로는 사용자별로 나뉘어 보이지만 보안적으로 격리된 채널은 아닙니다.
+| 모듈 | 포트 | 역할 |
+|---|---|---|
+| `event-contracts` | — | `OrderCreatedEvent`, `InventoryReservedEvent`, `InventoryFailedEvent`, `PaymentCompletedEvent`, `PaymentFailedEvent` |
+| `order-service` | 8081 | 주문 생성 API, Outbox 패턴, ShedLock |
+| `inventory-service` | 8084 | Redis 재고 차감/복원 (Lua 스크립트 원자성 보장) |
+| `payment-service` | 8082 | 결제 처리, 멱등성, DLQ |
+| `websocket-service` | 8083 | STOMP 기반 실시간 알림 |
 
 ## 기술 스택
 
-- Java 17
-- Spring Boot 3.4.x
-- Spring Kafka
-- Spring WebSocket (STOMP)
-- Gradle multi-module build
-- JUnit 5
-- Embedded Kafka Test
+- Java 21 + Spring Boot 3 (Spring Web, Spring Data JPA, Spring Data Redis, Spring Kafka)
+- H2 (order/payment-service 각각 독립 DB) + Redis (inventory-service)
+- Kafka (KRaft 모드) — 로컬 검증은 `docker-compose`, 통합 테스트는 `EmbeddedKafka`
+- Kubernetes (k3s 호환 클러스터 — OrbStack/k3d 등) + kustomize
+- ShedLock (DB 기반 분산 락)
+- Gradle 멀티모듈
 
-## 로컬 애플리케이션 실행
-
-저장소 루트에서 실행합니다.
+## 로컬 실행
 
 ```bash
-./gradlew test
+./gradlew test                          # 전체 유닛/통합 테스트
 ./gradlew :order-service:bootRun
 ./gradlew :payment-service:bootRun
+./gradlew :inventory-service:bootRun
 ./gradlew :websocket-service:bootRun
 ```
 
-> 참고: 현재 애플리케이션은 Kafka 브로커 주소를 `KAFKA_BOOTSTRAP_SERVERS` 환경 변수로 받을 수 있습니다. 지정하지 않으면 기본값은 `localhost:9092` 입니다.
+Kafka 브로커 주소는 `KAFKA_BOOTSTRAP_SERVERS` 환경변수로 주입합니다 (기본값 `localhost:9092`). Redis는 `REDIS_HOST` / `REDIS_PORT` (기본값 `localhost:6379`).
 
-## 로컬 k3s + Kafka 운영 자산
+## k8s 배포
 
-이 저장소는 **k3s 클러스터가 이미 준비된 상태**를 전제로 Kafka 운영 스크립트를 제공합니다.
-
-왜 이렇게 했는가?
-
-- k3s 설치 자체는 OS/개발 환경 의존성이 큽니다.
-- 반면 Kafka 배포 자산은 저장소 안에서 버전 관리하는 편이 재현성이 좋습니다.
-
-### 포함된 파일
-
-- `infra/k3s/README.md`
-- `infra/kafka/values-dev.yaml`
-- `scripts/dev/up.sh`
-- `scripts/dev/down.sh`
-- `scripts/dev/status.sh`
-- `scripts/dev/topic.sh`
-- `scripts/dev/build-app-images.sh`
-- `scripts/dev/deploy-apps.sh`
-- `scripts/dev/app-status.sh`
-- `Makefile`
-
-### 사용 흐름
+k3s 호환 클러스터(OrbStack, k3d 등)가 준비된 상태에서:
 
 ```bash
-make dev-up
-make dev-status
-make dev-topic-create-order
-make dev-topic-create-payment
-make dev-topic-list
-make app-build
-make app-deploy
-make app-status
+make app-build      # 3개 서비스 Docker 이미지 빌드
+make app-deploy      # kustomize 매니페스트 적용 (Redis, Kafka, order/payment/inventory/websocket-service)
+make app-status      # 파드 상태 확인
 ```
 
-### 현재 인프라 범위
-
-- single-node k3s 가 준비되어 있다고 가정
-- Helm 으로 Bitnami Kafka chart 설치
-- KRaft 모드와 단일 replica 기준의 개발용 설정
-- 기본 접근 방식은 **클러스터 내부 통신 기준**
-
-즉, 지금 단계는 **클러스터 안에 Kafka 를 일관되게 올리는 것**까지가 목표입니다. 호스트에서 띄운 Spring Boot 프로세스가 k3s 내부 Kafka 에 직접 붙는 external listener 전략은 아직 포함하지 않았습니다.
-
-따라서 현재 로컬 실행 경로는 두 가지로 나뉩니다.
-
-1. 애플리케이션 기능 검증: `./gradlew test`, `bootRun`, Embedded Kafka 기반 검증
-2. 클러스터 인프라 검증: `make dev-up`, `make dev-status` 로 k3s 내부 Kafka 배포 자산 확인
-
-### 애플리케이션을 k3s 파드로 올리는 흐름
-
-```bash
-make app-build
-make app-deploy
-make app-status
-```
-
-이 경로에서는 `order-service`, `payment-service`, `websocket-service` 가 모두 `kafka` 네임스페이스 안에 배포되고, 각 파드는 `KAFKA_BOOTSTRAP_SERVERS=kafka-broker-headless.kafka.svc.cluster.local:9092` 로 브로커 전용 엔드포인트에 붙습니다.
-
-## k3s / Helm / Kafka 아키텍처 초안
-
-아래 다이어그램은 현재 저장소가 의도하는 **로컬 k3s 기반 운영 경로**를 요약한 초안입니다.
-
-```mermaid
-flowchart TB
-    Dev[Developer Machine]
-    Docker[Docker Desktop]
-    K3d[k3d Cluster]
-    Server[k3s Server Node]
-    Agent[k3s Agent Node]
-    Helm[Helm Release: Kafka]
-    Controller[Kafka Controller]
-    Broker[Kafka Broker]
-    PVC1[PVC: controller data]
-    PVC2[PVC: broker data]
-    LP[local-path StorageClass]
-
-    Dev --> Docker
-    Docker --> K3d
-    K3d --> Server
-    K3d --> Agent
-    Dev --> Helm
-    Helm --> Controller
-    Helm --> Broker
-    Controller --> PVC1
-    Broker --> PVC2
-    PVC1 --> LP
-    PVC2 --> LP
-```
-
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant Make as make dev-up
-    participant Helm as Helm
-    participant K8s as k3s API
-    participant Kafka as Kafka Pods
-
-    Dev->>Make: make dev-up
-    Make->>Helm: helm upgrade --install kafka
-    Helm->>K8s: create namespace/service/statefulsets/pvc
-    K8s->>Kafka: schedule controller and broker
-    Kafka-->>Dev: kafka.kafka.svc.cluster.local:9092
-    Dev->>Make: make dev-status
-    Make->>K8s: kubectl get pods/services/pvc
-```
-
-```mermaid
-flowchart LR
-    OS[order-service]
-    PS[payment-service]
-    WS[websocket-service]
-    K[(Kafka ClusterIP Service)]
-    OC[order-created]
-    PC[payment-completed]
-
-    OS -->|publish| OC
-    OC --> K
-    K -->|consume| PS
-    PS -->|publish| PC
-    PC --> K
-    K -->|consume| WS
-```
-
-PlantUML 초안은 `docs/diagrams/` 아래에 함께 둡니다. README 에서는 GitHub 렌더링 호환성을 위해 Mermaid 를 우선 사용합니다.
+매니페스트는 `infra/k3s/apps/kustomization.yaml`로 관리되며, Actuator 기반 readiness/liveness probe로 안전한 롤링 배포를 지원합니다.
 
 ## 테스트 전략
 
-현재 브랜치에서는 기능별로 다음 검증을 수행합니다.
-
-- `event-contracts`: 계약 생성 및 JSON 직렬화 테스트
-- `order-service`: HTTP 호출 후 `order-created` 발행 검증
-- `payment-service`: `order-created` 소비 후 `payment-completed` 발행 검증
-- `websocket-service`: `payment-completed` 소비 후 STOMP destination 브로드캐스트 검증
-
-실행 명령:
+- `event-contracts`: 이벤트 레코드 생성/직렬화 테스트
+- `order-service`: `EmbeddedKafka` 기반 — HTTP 요청 → Outbox 발행 → 토픽 발행 검증
+- `payment-service`: `inventory-reserved` 소비 → `payment-completed` 발행 + 멱등성 검증
+- `inventory-service`: Redis 기반 재고 차감/복원의 원자성 검증
 
 ```bash
 ./gradlew test
@@ -283,9 +120,7 @@ PlantUML 초안은 `docs/diagrams/` 아래에 함께 둡니다. README 에서는
 
 ## AI 코드리뷰 자동화
 
-PR이 열리거나 커밋이 추가되면 GitHub Actions가 자동으로 diff를 분석하여 코드리뷰 코멘트를 PR에 게시합니다.
-
-### 전체 흐름
+PR이 열리거나 push되면 GitHub Actions가 diff를 파일 단위로 분석해 GitHub Models(GPT-4o)로 한국어 코드리뷰를 자동 게시합니다.
 
 ```mermaid
 sequenceDiagram
@@ -296,133 +131,44 @@ sequenceDiagram
     participant PR as Pull Request
 
     Dev->>GH: git push (feature branch)
-    Dev->>GH: PR open / push to open PR
     GH->>Actions: pull_request 이벤트 트리거
-    Actions->>Actions: git diff (base..head) 추출
-    Actions->>Actions: Java·YAML·Gradle 파일만 필터링
-    Actions->>Models: diff + 리뷰 프롬프트 전송
-    Models-->>Actions: 코드리뷰 마크다운 반환
-    Actions->>PR: 코멘트 게시 (또는 기존 코멘트 업데이트)
-    PR-->>Dev: 리뷰 알림 수신
-```
-
-### 리뷰 포맷
-
-| 섹션 | 설명 |
-|------|------|
-| ✅ **잘된 점** | 잘 작성된 부분을 구체적으로 언급 |
-| 🔧 **개선 제안** | P1(Blocker) ~ P5(Nit) 우선순위로 제안 |
-| ❓ **질문** | 의도가 궁금한 부분을 존댓말로 질문 |
-
-**우선순위 기준:**
-
-| 레벨 | 기준 | 예시 |
-|------|------|------|
-| P1 Blocker | 머지 전 반드시 수정 | 보안 취약점, 데이터 손실 위험 |
-| P2 Critical | 머지 전 강하게 권장 | 테스트 미커버, 회귀 위험 |
-| P3 Major | 후속 PR 수정 | 성능·가독성에 큰 영향 |
-| P4 Minor | 선택 사항 | 변수명, 주석, 작은 리팩토링 |
-| P5 Nit | 단순 의견 | 오타, 여백 |
-
-### 관련 파일
-
-```text
-.github/
-└── workflows/
-    └── ai-code-review.yml   ← Actions 트리거 및 권한 정의
-scripts/
-└── ai-review/
-    ├── review.py            ← diff 추출 · GitHub Models 호출 · 코멘트 게시
-    └── requirements.txt     ← openai SDK (GitHub Models 호환 엔드포인트)
-```
-
-### 동작 조건
-
-- PR 이벤트: `opened` · `synchronize` · `reopened`
-- 리뷰 대상 파일: `.java` · `.kt` · `.yaml` · `.yml` · `.gradle` · `.properties`
-- 인증: `GITHUB_TOKEN` (별도 API 키 불필요, `models: read` 권한으로 GitHub Models 사용)
-- 동일 PR에 재push 시 기존 리뷰 코멘트를 **업데이트** (중복 방지)
-
-### 환경별 적용 전략 비교
-
-> "왜 토이프로젝트에서는 GitHub Actions를 썼고, 업무환경에서는 Claude Skills를 쓰나요?"
-> → 차이는 **무료/유료가 아니라 자동화 수준과 실행 위치**입니다.
-
-| 항목 | 토이프로젝트<br>(GitHub Actions + GitHub Models) | 업무환경<br>(Claude Code Skills + Jenkins) |
-|------|---|---|
-| **트리거** | PR 이벤트 → 완전 자동 | 개발자가 `/pr-review` 직접 입력 → 반자동 |
-| **실행 위치** | GitHub Actions 클라우드 | 로컬 Claude Code 세션 |
-| **AI 모델** | GPT-4o (GitHub Models) | Claude Sonnet / Opus |
-| **인증** | `GITHUB_TOKEN` (무료, 추가 계정 불필요) | Claude Code Pro / Team 플랜 |
-| **CI 연동** | GitHub Actions workflow | Jenkins pipeline stage |
-| **팀 공유 방법** | `.github/workflows/*.yml` 커밋 | `.claude/skills/*.md` 커밋 |
-| **사람 개입** | 없음 | 있음 (명령어 입력) |
-| **컨텍스트 이해** | diff 텍스트만 전달 | Claude가 파일 직접 읽고 분석 가능 |
-| **적합한 상황** | PR마다 자동 리뷰가 필요한 경우 | 특정 PR을 깊게 리뷰하고 싶을 때 |
-
-```mermaid
-flowchart LR
-    subgraph 토이프로젝트["토이프로젝트 (GitHub Actions)"]
-        direction LR
-        A[git push] --> B[PR open]
-        B --> C[Actions 자동 트리거]
-        C --> D[GitHub Models GPT-4o]
-        D --> E[PR 코멘트 자동 게시]
+    Actions->>Actions: diff를 파일 단위로 분리 후 토큰 한도 내로 배치 구성
+    loop 배치마다
+        Actions->>Models: 배치 diff + 리뷰 프롬프트 전송
+        Models-->>Actions: 코드리뷰 마크다운 반환
     end
-
-    subgraph 업무환경["업무환경 (Claude Skills + Jenkins)"]
-        direction LR
-        F[개발자] -->|/pr-review 입력| G[Claude Code 로컬]
-        G --> H[Claude Sonnet/Opus]
-        H --> I[리뷰 결과 출력 + PR 코멘트]
-        J[Jenkins] -->|pipeline stage| K[Claude API 호출]
-        K --> I
-    end
+    Actions->>PR: 배치 결과를 합쳐 코멘트 게시 (재push 시 업데이트)
 ```
 
-두 방식은 **상호 보완적**이며 함께 사용할 수 있습니다.
-로컬에서 `/pr-review`로 빠르게 확인 → PR push 후 Actions가 팀 공유용 리뷰 자동 게시.
+큰 PR(예: 새 모듈 추가)에서 diff가 모델의 토큰 한도(8000 tokens)를 초과해 리뷰가 통째로 실패하는 문제를, **파일 단위로 diff를 쪼개 배치 호출**하는 방식으로 해결했습니다 — [`scripts/ai-review/review.py`](scripts/ai-review/review.py).
 
-## 단계별 로드맵
+| 레벨 | 기준 |
+|---|---|
+| P1 Blocker | 머지 전 반드시 수정 — 보안 취약점, 데이터 손실 위험 |
+| P2 Critical | 머지 전 강하게 권장 — 테스트 미커버, 회귀 위험 |
+| P3 Major | 후속 PR 수정 — 성능·가독성 |
+| P4 Minor | 선택 사항 |
+| P5 Nit | 단순 의견 |
 
-### Phase 1
+## 진행 단계
 
-- 멀티모듈 구조 만들기
-- 서비스 부트스트랩 정리
-- 이벤트 계약 분리
+| 단계 | 내용 | 상태 |
+|---|---|---|
+| 1 | 멀티모듈 구조 + 주문/결제/WebSocket 최소 이벤트 흐름 | ✅ |
+| 2 | DB 영속화 + 전체 상태 전이 (PENDING/CONFIRMED/CANCELED) | ✅ |
+| 3 | Outbox 패턴 | ✅ |
+| 4 | DLQ + k3s 운영 설정 | ✅ |
+| 5 | WebSocket 실시간 알림 | ✅ |
+| 6 | Spring Actuator + HTTP Probe + Ingress | ✅ |
+| 7 | ShedLock 분산 락 + 스케일아웃 | ✅ |
+| 8 | **Choreography Saga + inventory-service(Redis) + 보상 트랜잭션** | ✅ |
 
-### Phase 2
-
-- 주문 → 결제 → WebSocket 이벤트 흐름 연결
-- Kafka producer / consumer 추가
-- 테스트 가능한 최소 수직 슬라이스 완성
-
-### Phase 3
-
-- 영속화 추가
-- Outbox Pattern 도입
-- Retry / DLQ 전략 추가
-- Idempotency 추가
-
-### Phase 4
-
-- Redis 연동
-- 애플리케이션의 k3s 배포 자산 정리
-- 관측성/운영 보조 스크립트 확장
+각 단계는 feature 브랜치 → PR(자동 코드리뷰) → main 머지 순서로 진행했습니다.
 
 ## 설계 원칙
 
-1. **공유 계약은 작게 유지한다.**
-2. **서비스 경계는 코드로 분리한다.**
-3. **기능은 작은 수직 슬라이스로 추가한다.**
-4. **인프라는 저장소 안에서 재현 가능해야 한다.**
-5. **지금 단계에서 Phase 3 복잡도를 미리 당겨오지 않는다.**
-
-## 이 저장소를 보는 사람에게
-
-이 프로젝트는 “모든 것을 한 번에 구현한 완성형 샘플”이 아니라, **이벤트 드리븐 시스템을 실무 감각으로 단계별 확장해가는 학습용 프레임**입니다.
-
-그래서 일부 미구현 영역은 의도적입니다. 지금 브랜치의 핵심 가치는 다음 두 가지입니다.
-
-1. 모듈 경계가 명확한 출발점
-2. Order → Payment → WebSocket 으로 이어지는 최소 이벤트 흐름
+1. **공유 계약(event-contracts)은 비즈니스 로직 없이 작게 유지한다.**
+2. **서비스 경계는 저장소(DB)로도 분리한다** — order/payment는 각자 H2, inventory는 Redis.
+3. **강한 일관성보다 결과적 일관성을 택한다** — 2PC 대신 Outbox + 멱등성 + Saga 조합.
+4. **원자성이 필요한 다단계 작업은 단일 명령으로 묶는다** — Redis Lua 스크립트, 같은 DB 트랜잭션.
+5. **인프라는 저장소 안에서 재현 가능해야 한다** — kustomize 매니페스트, Helm values 모두 버전 관리.
