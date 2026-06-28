@@ -27,9 +27,15 @@ public class OutboxPublisher {
         this.orderCreatedTopic = orderCreatedTopic;
     }
 
-    @Scheduled(fixedDelayString = "${app.outbox.poll-interval-ms:1000}")
+    @Scheduled(
+            initialDelayString = "${app.outbox.initial-delay-ms:1000}",
+            fixedDelayString = "${app.outbox.poll-interval-ms:1000}"
+    )
     @SchedulerLock(name = "outbox-publisher", lockAtLeastFor = "PT1S", lockAtMostFor = "PT30S")
     public void publishPending() {
+        // ShedLock을 통과한, 즉 "이번 폴링 주기에 락을 잡은" 인스턴스만 이 줄을 찍는다.
+        // 여러 인스턴스가 동시에 호출해도 락을 못 잡은 쪽은 이 로그 자체가 안 남는다.
+        log.info("Outbox polling started — lock acquired (thread={})", Thread.currentThread().getName());
         outboxRepository.findByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING).forEach(event -> {
             kafkaTemplate.send(orderCreatedTopic, event.getAggregateId(), event.getPayload())
                     .whenComplete((result, ex) -> {
