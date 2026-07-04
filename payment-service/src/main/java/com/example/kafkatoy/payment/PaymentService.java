@@ -30,10 +30,10 @@ public class PaymentService {
     public PaymentCompletedEvent process(InventoryReservedEvent event) {
         String orderId = event.orderId();
 
-        if (paymentRepository.existsById(orderId)) {
+        PaymentRecord existing = paymentRepository.findById(orderId).orElse(null);
+        if (existing != null) {
             log.warn("Duplicate payment request, skipping: orderId={}", orderId);
             paymentDuplicateCounter.increment();
-            PaymentRecord existing = paymentRepository.findById(orderId).orElseThrow();
             return PaymentCompletedEvent.initial(existing.getOrderId(), existing.getUserId());
         }
 
