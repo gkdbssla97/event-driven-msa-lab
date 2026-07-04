@@ -1,5 +1,6 @@
 package com.example.kafkatoy.inventory;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,7 +38,7 @@ class InventoryServiceConcurrencyTest {
         redisTemplate.afterPropertiesSet();
 
         ReservationStore reservationStore = new ReservationStore(redisTemplate);
-        inventoryService = new InventoryService(redisTemplate, reservationStore, 100L);
+        inventoryService = new InventoryService(redisTemplate, reservationStore, new SimpleMeterRegistry(), 100L);
     }
 
     @AfterEach
