@@ -1,5 +1,7 @@
 package com.example.kafkatoy.inventory;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,6 +16,11 @@ import java.util.Optional;
 public class InventoryService {
 
     private static final Logger log = LoggerFactory.getLogger(InventoryService.class);
+
+    private final Counter reserveSuccessCounter;
+    private final Counter reserveFailureCounter;
+    private final Counter compensateRestoredCounter;
+    private final Counter compensateNoopCounter;
 
     // KEYS[1] = inventory:{productId}
     // ARGV[1] = quantity to reserve
@@ -49,10 +56,19 @@ public class InventoryService {
 
     public InventoryService(StringRedisTemplate redisTemplate,
                             ReservationStore reservationStore,
+                            MeterRegistry meterRegistry,
                             @Value("${app.inventory.initial-stock:100}") long initialStock) {
         this.redisTemplate = redisTemplate;
         this.reservationStore = reservationStore;
         this.initialStock = initialStock;
+        this.reserveSuccessCounter = Counter.builder("inventory.reserve")
+                .tag("result", "success").register(meterRegistry);
+        this.reserveFailureCounter = Counter.builder("inventory.reserve")
+                .tag("result", "insufficient_stock").register(meterRegistry);
+        this.compensateRestoredCounter = Counter.builder("inventory.compensate")
+                .tag("result", "restored").register(meterRegistry);
+        this.compensateNoopCounter = Counter.builder("inventory.compensate")
+                .tag("result", "not_found").register(meterRegistry);
     }
 
     /**
@@ -68,9 +84,11 @@ public class InventoryService {
         Long remaining = redisTemplate.execute(RESERVE_SCRIPT, List.of(key), String.valueOf(quantity));
         if (remaining == null || remaining < 0) {
             log.warn("Insufficient stock: productId={}, requested={}", productId, quantity);
+            reserveFailureCounter.increment();
             return false;
         }
         reservationStore.save(orderId, productId, quantity);
+        reserveSuccessCounter.increment();
         log.info("Stock reserved: productId={}, quantity={}, remaining={}", productId, quantity, remaining);
         return true;
     }
@@ -88,10 +106,12 @@ public class InventoryService {
         String key = "reservation:" + orderId;
         List<String> result = redisTemplate.execute(COMPENSATE_SCRIPT, List.of(key));
         if (result == null) {
+            compensateNoopCounter.increment();
             return Optional.empty();
         }
         String productId = result.get(0);
         int quantity = Integer.parseInt(result.get(1));
+        compensateRestoredCounter.increment();
         log.info("Compensation complete (atomic): orderId={}, productId={}, quantity={}", orderId, productId, quantity);
         return Optional.of(new ReservationStore.Reservation(productId, quantity));
     }

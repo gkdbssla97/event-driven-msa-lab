@@ -1,0 +1,159 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus:9090
+        isDefault: true
+        editable: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: default
+        folder: MSA Lab
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-msa
+data:
+  msa-lab.json: |
+    {
+      "title": "MSA Lab — Saga 관측성 대시보드",
+      "uid": "msa-lab-saga",
+      "schemaVersion": 38,
+      "time": { "from": "now-30m", "to": "now" },
+      "refresh": "10s",
+      "panels": [
+        {
+          "id": 1, "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+          "type": "stat", "title": "재고 차감 성공 (rate/min)",
+          "targets": [{ "expr": "rate(inventory_reserve_total{result=\"success\"}[1m]) * 60", "legendFormat": "성공" }]
+        },
+        {
+          "id": 2, "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+          "type": "stat", "title": "재고 차감 실패 (rate/min)",
+          "targets": [{ "expr": "rate(inventory_reserve_total{result=\"insufficient_stock\"}[1m]) * 60", "legendFormat": "재고부족" }],
+          "options": { "colorMode": "background" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } }
+        },
+        {
+          "id": 3, "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+          "type": "stat", "title": "보상 트랜잭션 복원 횟수",
+          "targets": [{ "expr": "inventory_compensate_total{result=\"restored\"}", "legendFormat": "복원됨" }]
+        },
+        {
+          "id": 4, "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+          "type": "stat", "title": "Outbox PENDING 건수",
+          "targets": [{ "expr": "outbox_pending", "legendFormat": "PENDING" }],
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 20 }] } } }
+        },
+        {
+          "id": 5, "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+          "type": "timeseries", "title": "재고 차감 성공 vs 실패 (rate/min)",
+          "targets": [
+            { "expr": "rate(inventory_reserve_total{result=\"success\"}[1m]) * 60", "legendFormat": "성공" },
+            { "expr": "rate(inventory_reserve_total{result=\"insufficient_stock\"}[1m]) * 60", "legendFormat": "재고부족" }
+          ]
+        },
+        {
+          "id": 6, "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+          "type": "timeseries", "title": "Outbox 발행 처리량 (rate/min)",
+          "targets": [
+            { "expr": "rate(outbox_published_total[1m]) * 60", "legendFormat": "발행 성공" },
+            { "expr": "rate(outbox_publish_failed_total[1m]) * 60", "legendFormat": "발행 실패" }
+          ]
+        },
+        {
+          "id": 7, "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+          "type": "timeseries", "title": "결제 처리 (신규 vs 중복, rate/min)",
+          "targets": [
+            { "expr": "rate(payment_processed_total{result=\"new\"}[1m]) * 60", "legendFormat": "신규" },
+            { "expr": "rate(payment_processed_total{result=\"duplicate\"}[1m]) * 60", "legendFormat": "중복(멱등)" }
+          ]
+        },
+        {
+          "id": 8, "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+          "type": "timeseries", "title": "보상 트랜잭션 (복원 vs 중복 방지, rate/min)",
+          "targets": [
+            { "expr": "rate(inventory_compensate_total{result=\"restored\"}[1m]) * 60", "legendFormat": "재고 복원됨" },
+            { "expr": "rate(inventory_compensate_total{result=\"not_found\"}[1m]) * 60", "legendFormat": "이미 처리됨(멱등)" }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.2
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: "admin"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          configMap:
+            name: grafana-dashboard-msa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
