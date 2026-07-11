@@ -31,6 +31,8 @@ import static org.mockito.Mockito.verify;
 @SpringBootTest(
         webEnvironment = WebEnvironment.NONE,
         properties = {
+                // ShedLock 전략을 활성화 (기본값은 skip-locked)
+                "app.outbox.strategy=shedlock",
                 // 컨텍스트 기동 시 자동으로 한 번 도는 @Scheduled가 우리 테스트의 락 획득과
                 // 경합하지 않도록 첫 실행과 다음 실행 모두 테스트 시간보다 한참 뒤로 늦춤
                 "app.outbox.initial-delay-ms=600000",
@@ -61,7 +63,7 @@ class OutboxPublisherShedLockTest {
     }
 
     @Autowired
-    private OutboxPublisher outboxPublisher;
+    private ShedLockOutboxPublisher outboxPublisher;
 
     @MockitoSpyBean
     private OutboxRepository outboxRepository;
