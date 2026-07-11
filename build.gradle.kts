@@ -33,5 +33,11 @@ subprojects {
         // (OrbStack 등, 최소 1.40 요구)에서 거부된다. 최신 버전으로 고정한다.
         // Docker API는 하위 호환되므로 CI의 표준 Docker에서도 안전하다.
         systemProperty("api.version", "1.44")
+        // -Dbenchmark.* 규모 조절값을 테스트 JVM으로 전달
+        System.getProperties().forEach { key, value ->
+            if (key.toString().startsWith("benchmark.")) {
+                systemProperty(key.toString(), value.toString())
+            }
+        }
     }
 }
