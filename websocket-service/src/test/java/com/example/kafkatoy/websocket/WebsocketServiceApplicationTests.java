@@ -5,6 +5,7 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
 import com.example.kafkatoy.contracts.PaymentCompletedEvent;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -35,8 +36,12 @@ class WebsocketServiceApplicationTests {
         kafkaTemplate.send("payment-completed", event.orderId(), event);
 
         verify(simpMessagingTemplate, timeout(10000)).convertAndSend(
-                eq("/topic/payments/user-1"),
-                eq(event)
+                eq("/topic/orders/order-1"),
+                eq(Map.of(
+                        "orderId", "order-1",
+                        "status", "CONFIRMED",
+                        "eventType", "PAYMENT_COMPLETED"
+                ))
         );
     }
 }

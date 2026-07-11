@@ -6,6 +6,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -19,26 +22,28 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Lua 스크립트(RESERVE_SCRIPT)가 GET+DECRBY를 원자적으로 묶어
  * 동시 요청 환경에서도 오버셀(재고 음수)이 발생하지 않음을 검증한다.
  *
- * 실행 전 로컬에 Redis가 떠 있어야 한다:
- *   docker run -d --name redis-test -p 6380:6379 redis:7-alpine
+ * Redis는 Testcontainers가 자동으로 띄운다 (수동 컨테이너 준비 불필요).
  */
+@Testcontainers
 class InventoryServiceConcurrencyTest {
 
-    private static final int REDIS_PORT = 6380;
+    @Container
+    static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine")
+            .withExposedPorts(6379);
 
     private LettuceConnectionFactory connectionFactory;
-    private InventoryService inventoryService;
+    private InventoryStore inventoryStore;
 
     @BeforeEach
     void setUp() {
-        connectionFactory = new LettuceConnectionFactory("localhost", REDIS_PORT);
+        connectionFactory = new LettuceConnectionFactory(REDIS.getHost(), REDIS.getMappedPort(6379));
         connectionFactory.afterPropertiesSet();
 
         StringRedisTemplate redisTemplate = new StringRedisTemplate(connectionFactory);
         redisTemplate.afterPropertiesSet();
 
         ReservationStore reservationStore = new ReservationStore(redisTemplate);
-        inventoryService = new InventoryService(redisTemplate, reservationStore, new SimpleMeterRegistry(), 100L);
+        inventoryStore = new RedisInventoryStore(redisTemplate, reservationStore, new SimpleMeterRegistry(), 100L);
     }
 
     @AfterEach
@@ -52,7 +57,7 @@ class InventoryServiceConcurrencyTest {
         int initialStock = 10;
         int concurrentRequests = 50;
 
-        inventoryService.initStock(productId, initialStock);
+        inventoryStore.initStock(productId, initialStock);
 
         ExecutorService pool = Executors.newFixedThreadPool(concurrentRequests);
         CountDownLatch readyLatch = new CountDownLatch(concurrentRequests);
@@ -66,7 +71,7 @@ class InventoryServiceConcurrencyTest {
                 readyLatch.countDown();
                 try {
                     startLatch.await();
-                    if (inventoryService.reserve(orderId, productId, 1)) {
+                    if (inventoryStore.reserve(orderId, productId, 1)) {
                         successCount.incrementAndGet();
                     }
                 } catch (InterruptedException e) {
@@ -86,7 +91,7 @@ class InventoryServiceConcurrencyTest {
         assertThat(successCount.get())
                 .as("재고(%d)보다 많은 요청(%d)이 와도 성공 건수는 재고만큼만 허용되어야 함", initialStock, concurrentRequests)
                 .isEqualTo(initialStock);
-        assertThat(inventoryService.getStock(productId))
+        assertThat(inventoryStore.getStock(productId))
                 .as("오버셀(재고 음수) 발생 금지")
                 .isEqualTo(0);
     }

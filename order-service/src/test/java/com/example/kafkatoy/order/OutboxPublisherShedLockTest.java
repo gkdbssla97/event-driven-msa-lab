@@ -5,7 +5,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.testcontainers.containers.MySQLContainer;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -28,13 +31,12 @@ import static org.mockito.Mockito.verify;
 @SpringBootTest(
         webEnvironment = WebEnvironment.NONE,
         properties = {
+                // ShedLock 전략을 활성화 (기본값은 skip-locked)
+                "app.outbox.strategy=shedlock",
                 // 컨텍스트 기동 시 자동으로 한 번 도는 @Scheduled가 우리 테스트의 락 획득과
                 // 경합하지 않도록 첫 실행과 다음 실행 모두 테스트 시간보다 한참 뒤로 늦춤
                 "app.outbox.initial-delay-ms=600000",
-                "app.outbox.poll-interval-ms=600000",
-                // 다른 테스트 클래스와 같은 이름의 H2 DB를 공유하면 컨텍스트 종료 시
-                // create-drop으로 테이블이 사라져 "Table not found" 충돌이 날 수 있어 분리
-                "spring.datasource.url=jdbc:h2:mem:shedlocktest;DB_CLOSE_DELAY=-1"
+                "app.outbox.poll-interval-ms=600000"
         }
 )
 @EmbeddedKafka(
@@ -44,8 +46,24 @@ import static org.mockito.Mockito.verify;
 )
 class OutboxPublisherShedLockTest {
 
+    // 이 테스트는 MySqlTestContainer(다른 테스트가 공유하는 컨테이너)를 쓰지 않고 전용 컨테이너를
+    // 둔다. OrderServiceApplicationTests의 백그라운드 @Scheduled OutboxPublisher가 같은 shedlock
+    // 행을 두고 경합하면(둘 다 락을 못 잡아) 이 테스트의 "정확히 1회 실행" 검증이 흔들리기 때문이다.
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+
+    static {
+        MYSQL.start();
+    }
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
+
     @Autowired
-    private OutboxPublisher outboxPublisher;
+    private ShedLockOutboxPublisher outboxPublisher;
 
     @MockitoSpyBean
     private OutboxRepository outboxRepository;

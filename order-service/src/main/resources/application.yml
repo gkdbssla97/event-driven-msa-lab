@@ -2,13 +2,15 @@ spring:
   application:
     name: order-service
   datasource:
-    url: jdbc:h2:mem:orderdb;DB_CLOSE_DELAY=-1
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/orderdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USER:order}
+    password: ${DB_PASSWORD:orderpass}
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # 인메모리 create-drop이 아니라 update — 재시작해도 Outbox 이벤트가 살아남아야
+      # Outbox 패턴의 "발행 보장(내구성)" 전제가 성립한다.
+      ddl-auto: update
     show-sql: false
     properties:
       hibernate.format_sql: true
@@ -16,9 +18,6 @@ spring:
   sql:
     init:
       mode: always
-  h2:
-    console:
-      enabled: true
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
@@ -59,3 +58,7 @@ app:
       payment-completed: payment-completed
       payment-failed: payment-failed
       inventory-failed: inventory-failed
+  outbox:
+    # 발행 대상 선점 전략: skip-locked(기본, 병렬) | shedlock(분산 락, 직렬화)
+    strategy: ${OUTBOX_STRATEGY:skip-locked}
+    batch-size: 100

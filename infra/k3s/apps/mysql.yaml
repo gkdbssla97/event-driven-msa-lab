@@ -1,0 +1,111 @@
+# order/payment 서비스용 MySQL. 설계 원칙(서비스 경계를 저장소로도 분리)에 따라
+# 서비스마다 독립 인스턴스를 둔다. 로컬 lab이므로 자격증명은 inline (운영은 Secret 권장).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-order
+spec:
+  serviceName: mysql-order
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-order
+  template:
+    metadata:
+      labels:
+        app: mysql-order
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+            - name: MYSQL_DATABASE
+              value: orderdb
+            - name: MYSQL_USER
+              value: order
+            - name: MYSQL_PASSWORD
+              value: orderpass
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-order
+spec:
+  selector:
+    app: mysql-order
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-payment
+spec:
+  serviceName: mysql-payment
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-payment
+  template:
+    metadata:
+      labels:
+        app: mysql-payment
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+            - name: MYSQL_DATABASE
+              value: paymentdb
+            - name: MYSQL_USER
+              value: payment
+            - name: MYSQL_PASSWORD
+              value: paymentpass
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-payment
+spec:
+  selector:
+    app: mysql-payment
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306

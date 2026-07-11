@@ -1,26 +1,20 @@
 spring:
-  # datasource(url/username/password)는 Testcontainers가 @DynamicPropertySource로 주입한다.
-  jpa:
-    hibernate:
-      ddl-auto: update
-    defer-datasource-initialization: true
-  sql:
-    init:
-      mode: always
   kafka:
     consumer:
-      group-id: order-service
+      group-id: websocket-service
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
 app:
   kafka:
     topics:
-      order-created: order-created
       payment-completed: payment-completed
       payment-failed: payment-failed
-      inventory-failed: inventory-failed
+  websocket:
+    allowed-origin-patterns:
+      - http://localhost:*
+      - http://127.0.0.1:*

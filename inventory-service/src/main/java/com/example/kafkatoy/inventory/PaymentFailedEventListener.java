@@ -20,12 +20,12 @@ public class PaymentFailedEventListener {
     private static final Logger log = LoggerFactory.getLogger(PaymentFailedEventListener.class);
 
     private final ObjectMapper objectMapper;
-    private final InventoryService inventoryService;
+    private final InventoryStore inventoryStore;
 
     public PaymentFailedEventListener(ObjectMapper objectMapper,
-                                      InventoryService inventoryService) {
+                                      InventoryStore inventoryStore) {
         this.objectMapper = objectMapper;
-        this.inventoryService = inventoryService;
+        this.inventoryStore = inventoryStore;
     }
 
     @KafkaListener(topics = "${app.kafka.topics.payment-failed}", groupId = "${spring.kafka.consumer.group-id}")
@@ -36,7 +36,7 @@ public class PaymentFailedEventListener {
         // compensate()는 예약 조회 + 재고 복원 + 예약 삭제를 단일 Lua 스크립트로 원자적 실행.
         // 재고는 복원됐는데 예약 키만 남는 부분 실패가 불가능하므로, 이벤트가
         // 재전달돼도 이미 삭제된 예약은 다시 조회되지 않아 중복 복원이 발생하지 않는다.
-        inventoryService.compensate(event.orderId()).ifPresentOrElse(
+        inventoryStore.compensate(event.orderId()).ifPresentOrElse(
                 reservation -> log.info("Compensation complete: stock restored for orderId={}, productId={}",
                         event.orderId(), reservation.productId()),
                 () -> log.warn("No reservation found for orderId={}, skipping compensation (already processed?)",

@@ -26,7 +26,7 @@ import org.springframework.kafka.test.utils.KafkaTestUtils;
         topics = {"inventory-reserved", "payment-completed", "payment-failed"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
-class PaymentServiceApplicationTests {
+class PaymentServiceApplicationTests extends MySqlTestContainer {
 
     @Autowired
     private KafkaTemplate<String, Object> kafkaTemplate;

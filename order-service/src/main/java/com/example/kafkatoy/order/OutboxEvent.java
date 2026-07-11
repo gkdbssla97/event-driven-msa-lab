@@ -4,12 +4,17 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+// (status, created_at) 인덱스가 없으면 FOR UPDATE SKIP LOCKED가 정렬을 위해 PENDING 행
+// 전체를 스캔하며 잠가버려, LIMIT으로 한 행만 가져와도 다른 폴러가 남은 행을 못 집는다.
+// 이 인덱스로 대상 행만 인덱스 순서로 읽어 정확히 배치 크기만큼만 잠근다.
 @Entity
-@Table(name = "outbox_events")
+@Table(name = "outbox_events",
+        indexes = @Index(name = "idx_outbox_status_created", columnList = "status, created_at"))
 public class OutboxEvent {
 
     @Id

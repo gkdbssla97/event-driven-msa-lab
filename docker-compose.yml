@@ -7,3 +7,51 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: orbstack
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: host.docker.internal:9092
+
+  # order-service 전용 MySQL (설계 원칙: 서비스 경계를 저장소로도 분리)
+  mysql-order:
+    image: mysql:8.0
+    container_name: mysql-order
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: orderdb
+      MYSQL_USER: order
+      MYSQL_PASSWORD: orderpass
+    volumes:
+      - mysql-order-data:/var/lib/mysql
+
+  # payment-service 전용 MySQL
+  mysql-payment:
+    image: mysql:8.0
+    container_name: mysql-payment
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: paymentdb
+      MYSQL_USER: payment
+      MYSQL_PASSWORD: paymentpass
+    volumes:
+      - mysql-payment-data:/var/lib/mysql
+
+  # inventory-service를 jdbc 모드(INVENTORY_STORE=jdbc)로 벤치마크할 때만 사용.
+  # 기본 redis 모드에서는 불필요.
+  mysql-inventory:
+    image: mysql:8.0
+    container_name: mysql-inventory
+    ports:
+      - "3308:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: inventorydb
+      MYSQL_USER: inventory
+      MYSQL_PASSWORD: inventorypass
+    volumes:
+      - mysql-inventory-data:/var/lib/mysql
+
+volumes:
+  mysql-order-data:
+  mysql-payment-data:
+  mysql-inventory-data:

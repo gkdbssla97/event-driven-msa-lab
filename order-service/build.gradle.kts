@@ -13,9 +13,11 @@ dependencies {
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
     implementation("net.javacrumbs.shedlock:shedlock-spring:6.3.1")
     implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.3.1")
-    runtimeOnly("com.h2database:h2")
+    runtimeOnly("com.mysql:mysql-connector-j")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.kafka:spring-kafka-test")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:mysql")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

@@ -10,4 +10,5 @@ resources:
   - websocket-service.yaml
   - inventory-service.yaml
   - redis.yaml
+  - mysql.yaml
   - ingress.yaml

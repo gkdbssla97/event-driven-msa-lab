@@ -2,17 +2,15 @@ spring:
   application:
     name: payment-service
   datasource:
-    url: jdbc:h2:mem:paymentdb;DB_CLOSE_DELAY=-1
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3307}/paymentdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USER:payment}
+    password: ${DB_PASSWORD:paymentpass}
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # PaymentRecord(멱등성 원장)는 재시작해도 남아있어야 중복 결제 차단이 유지된다.
+      ddl-auto: update
     show-sql: false
-  h2:
-    console:
-      enabled: true
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
