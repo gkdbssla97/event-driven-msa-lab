@@ -36,22 +36,43 @@ public class OrderCreatedEventListener {
         log.info("Received order-created: orderId={}, productId={}, quantity={}",
                 event.orderId(), event.productId(), event.quantity());
 
-        if (!inventoryStore.claimProcessing(event.orderId())) {
-            log.warn("Duplicate order-created event, skipping: orderId={}", event.orderId());
-            return;
+        switch (inventoryStore.claim(event.orderId())) {
+            case CLAIMED -> process(event);
+            // 중복 재전달: 처리를 다시 하지 않고, 첫 처리 때의 결과 이벤트를 그대로 재발행한다.
+            // (스킵하면 첫 발행이 유실됐을 때 사가가 영영 멈춘다 — "스킵"이 아니라 "replay")
+            case DUPLICATE_RESERVED -> {
+                log.warn("Duplicate order-created (already reserved), replaying inventory-reserved: orderId={}", event.orderId());
+                publishReserved(event);
+            }
+            case DUPLICATE_FAILED -> {
+                log.warn("Duplicate order-created (already failed), replaying inventory-failed: orderId={}", event.orderId());
+                publishFailed(event);
+            }
+            // 첫 처리가 결과를 남기기 전에 죽은 경우. 재발행할 근거가 없어 스킵한다(알려진 잔여 한계).
+            case IN_PROGRESS -> log.warn(
+                    "Duplicate order-created while first attempt in-progress/crashed, skipping: orderId={}", event.orderId());
         }
+    }
 
+    private void process(OrderCreatedEvent event) {
         boolean reserved = inventoryStore.reserve(event.orderId(), event.productId(), event.quantity());
+        inventoryStore.markOutcome(event.orderId(), reserved);
         if (reserved) {
-            reservedPublisher.publish(
-                    InventoryReservedEvent.of(event.orderId(), event.userId(), event.productId(), event.quantity())
-            );
+            publishReserved(event);
         } else {
-            failedPublisher.publish(
-                    InventoryFailedEvent.of(event.orderId(), event.userId(), event.productId(),
-                            event.quantity(), "Insufficient stock")
-            );
+            publishFailed(event);
         }
+    }
+
+    private void publishReserved(OrderCreatedEvent event) {
+        reservedPublisher.publish(
+                InventoryReservedEvent.of(event.orderId(), event.userId(), event.productId(), event.quantity()));
+    }
+
+    private void publishFailed(OrderCreatedEvent event) {
+        failedPublisher.publish(
+                InventoryFailedEvent.of(event.orderId(), event.userId(), event.productId(),
+                        event.quantity(), "Insufficient stock"));
     }
 
     private OrderCreatedEvent deserialize(String payload) {

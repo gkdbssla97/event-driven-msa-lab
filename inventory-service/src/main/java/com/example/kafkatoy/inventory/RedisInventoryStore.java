@@ -110,9 +110,29 @@ public class RedisInventoryStore implements InventoryStore {
         return Optional.of(new Reservation(productId, quantity));
     }
 
+    private static final java.time.Duration IDEMPOTENCY_TTL = java.time.Duration.ofDays(7);
+
     @Override
-    public boolean claimProcessing(String orderId) {
-        return reservationStore.claimProcessing(orderId);
+    public ClaimResult claim(String orderId) {
+        String key = idempotencyKey(orderId);
+        // SETNX(원자적)로 최초 처리자를 결정. 값은 처리 상태를 담는다.
+        Boolean isNew = redisTemplate.opsForValue().setIfAbsent(key, "IN_PROGRESS", IDEMPOTENCY_TTL);
+        if (Boolean.TRUE.equals(isNew)) {
+            return ClaimResult.CLAIMED;
+        }
+        String state = redisTemplate.opsForValue().get(key);
+        if ("RESERVED".equals(state)) return ClaimResult.DUPLICATE_RESERVED;
+        if ("FAILED".equals(state)) return ClaimResult.DUPLICATE_FAILED;
+        return ClaimResult.IN_PROGRESS;
+    }
+
+    @Override
+    public void markOutcome(String orderId, boolean reserved) {
+        redisTemplate.opsForValue().set(idempotencyKey(orderId), reserved ? "RESERVED" : "FAILED", IDEMPOTENCY_TTL);
+    }
+
+    private String idempotencyKey(String orderId) {
+        return "inventory:idempotency:" + orderId;
     }
 
     @Override

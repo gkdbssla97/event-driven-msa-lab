@@ -74,7 +74,8 @@ public class JdbcInventoryStore implements InventoryStore {
                 )""");
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS processed_orders (
-                    order_id VARCHAR(255) NOT NULL PRIMARY KEY
+                    order_id VARCHAR(255) NOT NULL PRIMARY KEY,
+                    status   VARCHAR(20)  NOT NULL
                 )""");
     }
 
@@ -134,14 +135,25 @@ public class JdbcInventoryStore implements InventoryStore {
     }
 
     @Override
-    public boolean claimProcessing(String orderId) {
+    public ClaimResult claim(String orderId) {
         try {
             // order_id PK의 유니크 제약이 최초 1회만 삽입을 허용한다(원자적 멱등성 가드).
-            jdbc.update("INSERT INTO processed_orders (order_id) VALUES (?)", orderId);
-            return true;
+            jdbc.update("INSERT INTO processed_orders (order_id, status) VALUES (?, 'IN_PROGRESS')", orderId);
+            return ClaimResult.CLAIMED;
         } catch (DuplicateKeyException e) {
-            return false;
+            String status = jdbc.query(
+                    "SELECT status FROM processed_orders WHERE order_id = ?",
+                    rs -> rs.next() ? rs.getString(1) : null, orderId);
+            if ("RESERVED".equals(status)) return ClaimResult.DUPLICATE_RESERVED;
+            if ("FAILED".equals(status)) return ClaimResult.DUPLICATE_FAILED;
+            return ClaimResult.IN_PROGRESS;
         }
+    }
+
+    @Override
+    public void markOutcome(String orderId, boolean reserved) {
+        jdbc.update("UPDATE processed_orders SET status = ? WHERE order_id = ?",
+                reserved ? "RESERVED" : "FAILED", orderId);
     }
 
     @Override

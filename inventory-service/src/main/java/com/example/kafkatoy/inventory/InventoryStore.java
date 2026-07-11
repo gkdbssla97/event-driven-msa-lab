@@ -19,12 +19,27 @@ public interface InventoryStore {
     /** 보상: 예약을 조회해 재고를 복원하고 예약을 삭제한다(멱등). 복원했으면 내역 반환. */
     Optional<Reservation> compensate(String orderId);
 
-    /** orderId에 대한 최초 처리 권한을 원자적으로 획득한다(멱등성 가드). 최초면 true. */
-    boolean claimProcessing(String orderId);
+    /**
+     * orderId에 대한 처리 권한을 원자적으로 획득한다.
+     * 최초면 CLAIMED, 중복이면 저장된 이전 결과(RESERVED/FAILED)를 알려준다.
+     * 첫 처리가 결과를 남기기 전에 죽은 경우는 IN_PROGRESS.
+     */
+    ClaimResult claim(String orderId);
+
+    /** claim(CLAIMED) 후 실제 처리 결과를 기록한다. 중복 재전달 시 replay에 쓰인다. */
+    void markOutcome(String orderId, boolean reserved);
 
     long getStock(String productId);
 
     void initStock(String productId, int stock);
 
     record Reservation(String productId, int quantity) {}
+
+    /**
+     * 멱등성 판정 결과.
+     * - CLAIMED: 최초 처리 → reserve 진행 후 markOutcome
+     * - DUPLICATE_RESERVED / DUPLICATE_FAILED: 이미 처리됨 → 같은 결과 이벤트를 재발행(replay)
+     * - IN_PROGRESS: 첫 처리가 결과를 남기기 전(=크래시 등) → 재발행할 근거가 없어 스킵
+     */
+    enum ClaimResult { CLAIMED, DUPLICATE_RESERVED, DUPLICATE_FAILED, IN_PROGRESS }
 }

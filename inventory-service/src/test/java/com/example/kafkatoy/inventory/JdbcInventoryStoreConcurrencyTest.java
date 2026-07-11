@@ -93,6 +93,19 @@ class JdbcInventoryStoreConcurrencyTest {
     }
 
     @Test
+    void claim_reportsPriorOutcomeForReplay() {
+        String orderId = "jdbc-idem-" + System.nanoTime();
+
+        // 최초 처리 권한 획득
+        assertThat(store.claim(orderId)).isEqualTo(InventoryStore.ClaimResult.CLAIMED);
+        // 결과 기록 전 재전달 → 재발행 근거 없음(첫 처리 진행 중/크래시)
+        assertThat(store.claim(orderId)).isEqualTo(InventoryStore.ClaimResult.IN_PROGRESS);
+        // 결과 기록 후 재전달 → 저장된 결과를 알려줘 replay 가능
+        store.markOutcome(orderId, true);
+        assertThat(store.claim(orderId)).isEqualTo(InventoryStore.ClaimResult.DUPLICATE_RESERVED);
+    }
+
+    @Test
     void compensate_isIdempotent() {
         String productId = "jdbc-compensate-" + System.nanoTime();
         String orderId = "jdbc-order-" + System.nanoTime();
