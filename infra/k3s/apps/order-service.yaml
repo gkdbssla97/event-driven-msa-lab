@@ -30,6 +30,14 @@ spec:
                 configMapKeyRef:
                   name: kafka-config
                   key: bootstrap-servers
+            - name: DB_HOST
+              value: mysql-order
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USER
+              value: order
+            - name: DB_PASSWORD
+              value: orderpass
           resources:
             requests:
               cpu: "100m"
