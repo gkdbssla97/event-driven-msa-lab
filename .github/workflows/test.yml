@@ -7,17 +7,9 @@ on:
 
 jobs:
   test:
+    # 테스트가 필요로 하는 MySQL/Redis는 Testcontainers가 실행 중에 직접 띄운다.
+    # (GitHub Actions ubuntu 러너에는 Docker가 기본 제공되어 별도 service 블록이 필요 없다.)
     runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6380:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 

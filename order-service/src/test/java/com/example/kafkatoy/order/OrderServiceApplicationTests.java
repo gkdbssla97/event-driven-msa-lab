@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.MockMvc;
         topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
-class OrderServiceApplicationTests {
+class OrderServiceApplicationTests extends MySqlTestContainer {
 
     @Autowired
     private MockMvc mockMvc;
