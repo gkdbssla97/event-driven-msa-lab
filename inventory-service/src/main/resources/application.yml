@@ -5,6 +5,12 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+  # app.inventory.store=jdbc일 때만 사용된다 (기본 redis 모드에서는 무시).
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3308}/inventorydb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USER:inventory}
+    password: ${DB_PASSWORD:inventorypass}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -47,4 +53,6 @@ app:
       inventory-failed: inventory-failed
       order-created-dlq: order-created.DLQ
   inventory:
+    # 재고 저장소 백엔드: redis(기본, Lua 원자성) | jdbc(RDB 조건부 UPDATE 원자성)
+    store: ${INVENTORY_STORE:redis}
     initial-stock: 100

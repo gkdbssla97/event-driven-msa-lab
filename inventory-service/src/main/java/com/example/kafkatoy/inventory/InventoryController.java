@@ -14,22 +14,22 @@ import java.util.Map;
 @RequestMapping("/inventory")
 public class InventoryController {
 
-    private final InventoryService inventoryService;
+    private final InventoryStore inventoryStore;
 
-    public InventoryController(InventoryService inventoryService) {
-        this.inventoryService = inventoryService;
+    public InventoryController(InventoryStore inventoryStore) {
+        this.inventoryStore = inventoryStore;
     }
 
     @GetMapping("/{productId}")
     public ResponseEntity<Map<String, Object>> getStock(@PathVariable String productId) {
-        long stock = inventoryService.getStock(productId);
+        long stock = inventoryStore.getStock(productId);
         return ResponseEntity.ok(Map.of("productId", productId, "stock", stock));
     }
 
     @PostMapping("/{productId}/init")
     public ResponseEntity<Map<String, Object>> initStock(@PathVariable String productId,
                                                           @RequestParam(defaultValue = "100") int stock) {
-        inventoryService.initStock(productId, stock);
+        inventoryStore.initStock(productId, stock);
         return ResponseEntity.ok(Map.of("productId", productId, "stock", stock, "message", "initialized"));
     }
 }

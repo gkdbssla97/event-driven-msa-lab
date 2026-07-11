@@ -32,7 +32,7 @@ class InventoryServiceConcurrencyTest {
             .withExposedPorts(6379);
 
     private LettuceConnectionFactory connectionFactory;
-    private InventoryService inventoryService;
+    private InventoryStore inventoryStore;
 
     @BeforeEach
     void setUp() {
@@ -43,7 +43,7 @@ class InventoryServiceConcurrencyTest {
         redisTemplate.afterPropertiesSet();
 
         ReservationStore reservationStore = new ReservationStore(redisTemplate);
-        inventoryService = new InventoryService(redisTemplate, reservationStore, new SimpleMeterRegistry(), 100L);
+        inventoryStore = new RedisInventoryStore(redisTemplate, reservationStore, new SimpleMeterRegistry(), 100L);
     }
 
     @AfterEach
@@ -57,7 +57,7 @@ class InventoryServiceConcurrencyTest {
         int initialStock = 10;
         int concurrentRequests = 50;
 
-        inventoryService.initStock(productId, initialStock);
+        inventoryStore.initStock(productId, initialStock);
 
         ExecutorService pool = Executors.newFixedThreadPool(concurrentRequests);
         CountDownLatch readyLatch = new CountDownLatch(concurrentRequests);
@@ -71,7 +71,7 @@ class InventoryServiceConcurrencyTest {
                 readyLatch.countDown();
                 try {
                     startLatch.await();
-                    if (inventoryService.reserve(orderId, productId, 1)) {
+                    if (inventoryStore.reserve(orderId, productId, 1)) {
                         successCount.incrementAndGet();
                     }
                 } catch (InterruptedException e) {
@@ -91,7 +91,7 @@ class InventoryServiceConcurrencyTest {
         assertThat(successCount.get())
                 .as("재고(%d)보다 많은 요청(%d)이 와도 성공 건수는 재고만큼만 허용되어야 함", initialStock, concurrentRequests)
                 .isEqualTo(initialStock);
-        assertThat(inventoryService.getStock(productId))
+        assertThat(inventoryStore.getStock(productId))
                 .as("오버셀(재고 음수) 발생 금지")
                 .isEqualTo(0);
     }

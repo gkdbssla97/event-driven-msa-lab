@@ -16,19 +16,16 @@ public class OrderCreatedEventListener {
     private static final Logger log = LoggerFactory.getLogger(OrderCreatedEventListener.class);
 
     private final ObjectMapper objectMapper;
-    private final InventoryService inventoryService;
-    private final ReservationStore reservationStore;
+    private final InventoryStore inventoryStore;
     private final InventoryReservedEventPublisher reservedPublisher;
     private final InventoryFailedEventPublisher failedPublisher;
 
     public OrderCreatedEventListener(ObjectMapper objectMapper,
-                                     InventoryService inventoryService,
-                                     ReservationStore reservationStore,
+                                     InventoryStore inventoryStore,
                                      InventoryReservedEventPublisher reservedPublisher,
                                      InventoryFailedEventPublisher failedPublisher) {
         this.objectMapper = objectMapper;
-        this.inventoryService = inventoryService;
-        this.reservationStore = reservationStore;
+        this.inventoryStore = inventoryStore;
         this.reservedPublisher = reservedPublisher;
         this.failedPublisher = failedPublisher;
     }
@@ -39,12 +36,12 @@ public class OrderCreatedEventListener {
         log.info("Received order-created: orderId={}, productId={}, quantity={}",
                 event.orderId(), event.productId(), event.quantity());
 
-        if (!reservationStore.claimProcessing(event.orderId())) {
+        if (!inventoryStore.claimProcessing(event.orderId())) {
             log.warn("Duplicate order-created event, skipping: orderId={}", event.orderId());
             return;
         }
 
-        boolean reserved = inventoryService.reserve(event.orderId(), event.productId(), event.quantity());
+        boolean reserved = inventoryStore.reserve(event.orderId(), event.productId(), event.quantity());
         if (reserved) {
             reservedPublisher.publish(
                     InventoryReservedEvent.of(event.orderId(), event.userId(), event.productId(), event.quantity())

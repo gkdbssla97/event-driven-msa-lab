@@ -44,6 +44,4 @@ public class ReservationStore {
     private String key(String orderId) {
         return "reservation:" + orderId;
     }
-
-    public record Reservation(String productId, int quantity) {}
 }
