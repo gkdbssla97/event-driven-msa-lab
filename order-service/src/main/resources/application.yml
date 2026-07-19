@@ -63,3 +63,7 @@ app:
     # 발행 대상 선점 전략: skip-locked(기본, 병렬) | shedlock(분산 락, 직렬화)
     strategy: ${OUTBOX_STRATEGY:skip-locked}
     batch-size: 100
+  saga:
+    # STARTED/RESERVED 상태로 이 시간(ms)을 넘긴 사가는 "멈춤"으로 보고 자동 취소·보상한다.
+    timeout-ms: ${SAGA_TIMEOUT_MS:300000}
+    sweep-interval-ms: ${SAGA_SWEEP_INTERVAL_MS:60000}

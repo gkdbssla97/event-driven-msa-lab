@@ -64,8 +64,8 @@ class SkipLockedOutboxPublisherTest {
     void concurrentPollers_grabDisjointRows() throws InterruptedException {
         TransactionTemplate seed = new TransactionTemplate(txManager);
         seed.executeWithoutResult(s -> {
-            outboxRepository.save(OutboxEvent.pending("agg-1", "ORDER_CREATED", "{}"));
-            outboxRepository.save(OutboxEvent.pending("agg-2", "ORDER_CREATED", "{}"));
+            outboxRepository.save(OutboxEvent.pending("order-created", "agg-1", "ORDER_CREATED", "{}"));
+            outboxRepository.save(OutboxEvent.pending("order-created", "agg-2", "ORDER_CREATED", "{}"));
         });
 
         CountDownLatch aLocked = new CountDownLatch(1);
