@@ -33,4 +33,16 @@ public class KafkaTopicConfig {
     public NewTopic inventoryReservedTopic(@Value("${app.kafka.topics.inventory-reserved}") String topicName) {
         return TopicBuilder.name(topicName).partitions(3).replicas(1).build();
     }
+
+    // DLQ 토픽은 격리하는 쪽(inventory/payment)의 recoverer가 발행 시 만들 수도 있지만,
+    // 구독자인 order-service가 뜰 때 선언해 두면 브로커 auto-create 설정과 무관하게 존재가 보장된다.
+    @Bean
+    public NewTopic orderCreatedDlqTopic(@Value("${app.kafka.topics.order-created-dlq}") String topicName) {
+        return TopicBuilder.name(topicName).partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic inventoryReservedDlqTopic(@Value("${app.kafka.topics.inventory-reserved-dlq}") String topicName) {
+        return TopicBuilder.name(topicName).partitions(3).replicas(1).build();
+    }
 }

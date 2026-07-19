@@ -80,26 +80,44 @@ public class OrderService {
     }
 
     /**
-     * 스위퍼가 판단한 "멈춘 사가"를 한 트랜잭션에서 종결한다:
-     * 주문 취소 + 사가 TIMED_OUT 마킹 + 재고 복원용 보상 이벤트를 Outbox에 적재.
-     *
-     * 셋이 order-service의 같은 로컬 트랜잭션이라 원자적으로 커밋된다 — 도중에 죽으면
-     * 통째로 롤백되어 사가는 비종착 상태로 남고 다음 스윕에서 다시 잡힌다. Outbox에 적재된
-     * 보상 이벤트는 OutboxPublisher가 at-least-once로 inventory-service에 전달하며,
-     * inventory의 compensate()가 멱등(예약 없으면 no-op)이라 재고 예약 전 타임아웃이어도 안전하다.
+     * 스위퍼가 판단한 "멈춘 사가"를 종결한다. {@link #failAndCompensate}에 TIMED_OUT을 위임한다.
      */
     @Transactional
     public boolean timeout(String orderId) {
+        return failAndCompensate(orderId, SagaStatus.TIMED_OUT, "Saga timeout — no downstream response");
+    }
+
+    /**
+     * 비정상 종료된 사가를 한 트랜잭션에서 종결한다:
+     * 주문 취소 + 사가 종착 마킹(terminalStatus) + 재고 복원용 보상 이벤트를 Outbox에 적재.
+     *
+     * 스위퍼(TIMED_OUT)와 DLQ 복구(FAILED_POISON)가 공유하는 경로 — 감지 계기만 다를 뿐
+     * "취소·마킹·보상"이라는 종결 액션은 동일하다.
+     *
+     * 셋이 order-service의 같은 로컬 트랜잭션이라 원자적으로 커밋된다 — 도중에 죽으면
+     * 통째로 롤백되어 사가는 비종착 상태로 남고 다음 스윕/재전달에서 다시 잡힌다. Outbox에 적재된
+     * 보상 이벤트는 OutboxPublisher가 at-least-once로 inventory-service에 전달하며,
+     * inventory의 compensate()가 멱등(예약 없으면 no-op)이라 재고 예약 전 실패여도 안전하다.
+     *
+     * 이미 종착된 사가는 건드리지 않는다(멱등) — 지연된 스윕이나 재전달된 DLQ 메시지가
+     * 같은 사가를 또 종결하려 해도 보상 이벤트는 한 번만 적재된다.
+     */
+    @Transactional
+    public boolean failAndCompensate(String orderId, SagaStatus terminalStatus, String reason) {
+        SagaState saga = sagaStateRepository.findById(orderId).orElse(null);
+        if (saga == null || saga.getStatus().isTerminal()) {
+            return false;
+        }
         Order order = orderRepository.findById(orderId).orElse(null);
         if (order == null) {
             return false;
         }
         order.cancel();
         orderRepository.save(order);
-        transitionSaga(orderId, SagaStatus.TIMED_OUT);
+        saga.transitionTo(terminalStatus);
+        sagaStateRepository.save(saga);
 
-        PaymentFailedEvent compensation = PaymentFailedEvent.of(
-                orderId, order.getUserId(), "Saga timeout — no downstream response");
+        PaymentFailedEvent compensation = PaymentFailedEvent.of(orderId, order.getUserId(), reason);
         outboxRepository.save(OutboxEvent.pending(
                 paymentFailedTopic, orderId, "PAYMENT_FAILED", serialize(compensation)));
         return true;

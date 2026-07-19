@@ -22,16 +22,35 @@ import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.containers.MySQLContainer;
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed", "inventory-reserved"},
+        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed", "inventory-reserved", "order-created.DLQ", "inventory-reserved.DLQ"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
-class OrderServiceApplicationTests extends MySqlTestContainer {
+class OrderServiceApplicationTests {
+
+    // 이 테스트는 Outbox 발행 스케줄러를 켠 채로 order-created의 "단일 레코드"를 단정한다.
+    // 공유 컨테이너를 쓰면 다른 테스트 클래스가 남긴 PENDING order-created 행까지 발행되어
+    // 레코드가 여러 개가 되므로, 전용 컨테이너로 격리한다(활성 발행 테스트의 공통 패턴).
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+
+    static {
+        MYSQL.start();
+    }
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
 
     @Autowired
     private MockMvc mockMvc;
