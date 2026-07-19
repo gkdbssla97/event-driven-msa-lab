@@ -28,4 +28,9 @@ public class KafkaTopicConfig {
     public NewTopic paymentFailedTopic(@Value("${app.kafka.topics.payment-failed}") String topicName) {
         return TopicBuilder.name(topicName).partitions(3).replicas(1).build();
     }
+
+    @Bean
+    public NewTopic inventoryReservedTopic(@Value("${app.kafka.topics.inventory-reserved}") String topicName) {
+        return TopicBuilder.name(topicName).partitions(3).replicas(1).build();
+    }
 }

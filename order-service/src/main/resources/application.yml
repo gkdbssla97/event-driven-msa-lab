@@ -58,6 +58,7 @@ app:
       payment-completed: payment-completed
       payment-failed: payment-failed
       inventory-failed: inventory-failed
+      inventory-reserved: inventory-reserved
   outbox:
     # 발행 대상 선점 전략: skip-locked(기본, 병렬) | shedlock(분산 락, 직렬화)
     strategy: ${OUTBOX_STRATEGY:skip-locked}

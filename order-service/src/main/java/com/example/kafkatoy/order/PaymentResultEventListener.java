@@ -34,14 +34,14 @@ public class PaymentResultEventListener {
     public void handlePaymentFailed(String payload) {
         PaymentFailedEvent event = deserialize(payload, PaymentFailedEvent.class);
         log.info("Payment failed: orderId={}, reason={}", event.orderId(), event.failureReason());
-        orderService.cancel(event.orderId());
+        orderService.cancel(event.orderId(), SagaStatus.COMPENSATED);
     }
 
     @KafkaListener(topics = "${app.kafka.topics.inventory-failed}", groupId = "${spring.kafka.consumer.group-id}")
     public void handleInventoryFailed(String payload) {
         InventoryFailedEvent event = deserialize(payload, InventoryFailedEvent.class);
         log.info("Inventory failed: orderId={}, reason={}", event.orderId(), event.failureReason());
-        orderService.cancel(event.orderId());
+        orderService.cancel(event.orderId(), SagaStatus.FAILED_INSUFFICIENT_STOCK);
     }
 
     private <T> T deserialize(String payload, Class<T> type) {

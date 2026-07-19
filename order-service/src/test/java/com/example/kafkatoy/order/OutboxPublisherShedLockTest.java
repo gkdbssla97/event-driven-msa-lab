@@ -41,7 +41,7 @@ import static org.mockito.Mockito.verify;
 )
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed"},
+        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed", "inventory-reserved"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 class OutboxPublisherShedLockTest {
