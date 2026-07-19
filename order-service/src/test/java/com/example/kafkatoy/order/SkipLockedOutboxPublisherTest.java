@@ -35,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 )
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed"},
+        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed", "inventory-reserved"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 class SkipLockedOutboxPublisherTest {

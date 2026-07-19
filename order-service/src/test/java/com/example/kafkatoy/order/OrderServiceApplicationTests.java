@@ -28,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed"},
+        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed", "inventory-reserved"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 class OrderServiceApplicationTests extends MySqlTestContainer {

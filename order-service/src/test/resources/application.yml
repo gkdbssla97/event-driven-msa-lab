@@ -24,3 +24,4 @@ app:
       payment-completed: payment-completed
       payment-failed: payment-failed
       inventory-failed: inventory-failed
+      inventory-reserved: inventory-reserved
