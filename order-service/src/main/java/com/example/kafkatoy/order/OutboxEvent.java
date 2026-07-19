@@ -20,6 +20,10 @@ public class OutboxEvent {
     @Id
     private String id;
 
+    // 발행 대상 Kafka 토픽. 원래 order-created 전용이었으나, 다른 이벤트(예: 사가
+    // 타임아웃 보상)도 Outbox로 안전하게 발행할 수 있도록 토픽을 이벤트에 담는다.
+    private String topic;
+
     private String aggregateId;
     private String eventType;
 
@@ -34,9 +38,10 @@ public class OutboxEvent {
 
     protected OutboxEvent() {}
 
-    public static OutboxEvent pending(String aggregateId, String eventType, String payload) {
+    public static OutboxEvent pending(String topic, String aggregateId, String eventType, String payload) {
         OutboxEvent event = new OutboxEvent();
         event.id = UUID.randomUUID().toString();
+        event.topic = topic;
         event.aggregateId = aggregateId;
         event.eventType = eventType;
         event.payload = payload;
@@ -54,6 +59,7 @@ public class OutboxEvent {
     }
 
     public String getId() { return id; }
+    public String getTopic() { return topic; }
     public String getAggregateId() { return aggregateId; }
     public String getEventType() { return eventType; }
     public String getPayload() { return payload; }

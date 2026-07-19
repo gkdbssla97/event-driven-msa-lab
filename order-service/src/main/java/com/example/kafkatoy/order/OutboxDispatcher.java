@@ -5,7 +5,6 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
@@ -26,19 +25,16 @@ public class OutboxDispatcher {
 
     private final OutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
-    private final String orderCreatedTopic;
     private final Counter publishedCounter;
     private final Counter publishFailedCounter;
 
     public OutboxDispatcher(
             OutboxRepository outboxRepository,
             KafkaTemplate<String, String> kafkaTemplate,
-            MeterRegistry meterRegistry,
-            @Value("${app.kafka.topics.order-created}") String orderCreatedTopic
+            MeterRegistry meterRegistry
     ) {
         this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;
-        this.orderCreatedTopic = orderCreatedTopic;
         this.publishedCounter = Counter.builder("outbox.published")
                 .description("Outbox events successfully published to Kafka")
                 .register(meterRegistry);
@@ -58,7 +54,7 @@ public class OutboxDispatcher {
      */
     public void dispatch(OutboxEvent event) {
         try {
-            kafkaTemplate.send(orderCreatedTopic, event.getAggregateId(), event.getPayload())
+            kafkaTemplate.send(event.getTopic(), event.getAggregateId(), event.getPayload())
                     .get(10, TimeUnit.SECONDS);
             event.markPublished();
             outboxRepository.save(event);
