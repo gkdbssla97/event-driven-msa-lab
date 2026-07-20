@@ -25,3 +25,5 @@ app:
       payment-failed: payment-failed
       inventory-failed: inventory-failed
       inventory-reserved: inventory-reserved
+      order-created-dlq: order-created.DLQ
+      inventory-reserved-dlq: inventory-reserved.DLQ

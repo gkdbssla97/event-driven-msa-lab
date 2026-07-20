@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 )
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed", "inventory-reserved"},
+        topics = {"order-created", "payment-completed", "payment-failed", "inventory-failed", "inventory-reserved", "order-created.DLQ", "inventory-reserved.DLQ"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 class SagaStateLifecycleTest extends MySqlTestContainer {

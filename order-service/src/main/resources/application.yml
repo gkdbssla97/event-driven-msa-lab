@@ -59,6 +59,10 @@ app:
       payment-failed: payment-failed
       inventory-failed: inventory-failed
       inventory-reserved: inventory-reserved
+      # DLQ 복구: 재시도 소진 후 격리된 poison 메시지를 order-service가 구독해 즉시 보상한다.
+      # (inventory가 order-created 처리 실패 → order-created.DLQ, payment가 inventory-reserved 처리 실패 → inventory-reserved.DLQ)
+      order-created-dlq: order-created.DLQ
+      inventory-reserved-dlq: inventory-reserved.DLQ
   outbox:
     # 발행 대상 선점 전략: skip-locked(기본, 병렬) | shedlock(분산 락, 직렬화)
     strategy: ${OUTBOX_STRATEGY:skip-locked}
