@@ -37,6 +37,73 @@ flowchart TB
 
 **Choreography Saga**: 중앙 오케스트레이터 없이, 각 서비스가 이벤트를 듣고 자기 일을 한 뒤 다음 이벤트를 발행합니다. 결제가 실패하면 `payment-failed` 이벤트를 inventory-service가 받아서 **이미 차감한 재고를 다시 복원**하는 보상 트랜잭션을 수행합니다.
 
+## 시스템 아키텍처
+
+서비스별 내부 구성, 저장소, Kafka, 그리고 사가를 견고하게 만드는 3개 백그라운드 메커니즘(Outbox 발행 / DLQ 복구 / 타임아웃 스위퍼)을 한 장에 담았습니다.
+
+```mermaid
+flowchart LR
+    Client([Client])
+    Browser([Browser])
+
+    subgraph order["order-service :8081"]
+        direction TB
+        OSVC["OrderController → OrderService"]
+        SAGA[("SagaState 테이블")]
+        OBX[("Outbox 테이블")]
+        PUB["OutboxPublisher<br/>SKIP LOCKED 병렬 폴링"]
+        SWEEP["SagaTimeoutSweeper<br/>침묵 사가 타임아웃 복구"]
+        DLQR["DlqRecoveryListener<br/>poison 즉시 복구"]
+        OSVC --> SAGA
+        OSVC --> OBX
+        OBX --> PUB
+        SWEEP --> SAGA
+        SWEEP --> OSVC
+        DLQR --> OSVC
+    end
+
+    subgraph inventory["inventory-service :8084"]
+        ISVC["InventoryStore<br/>Redis Lua 원자차감 / JDBC"]
+    end
+    subgraph payment["payment-service :8082"]
+        PSVC["PaymentService<br/>DB 멱등성"]
+    end
+    subgraph websocket["websocket-service :8083"]
+        WSVC["STOMP Broadcaster"]
+    end
+
+    ODB[("MySQL<br/>orderdb")]
+    PDB[("MySQL<br/>paymentdb")]
+    RDS[("Redis<br/>재고")]
+
+    KFK{{"Kafka 토픽<br/>order-created · inventory-reserved · inventory-failed<br/>payment-completed · payment-failed · *.DLQ"}}
+
+    Client -->|POST /orders| OSVC
+    OSVC --> ODB
+    PUB -->|이벤트 발행| KFK
+    KFK --> ISVC --> RDS
+    KFK --> PSVC --> PDB
+    KFK --> WSVC -->|STOMP push| Browser
+    KFK -.->|"*.DLQ (poison)"| DLQR
+
+    subgraph obs["관측성"]
+        PROM["Prometheus"] --> GRAF["Grafana"]
+    end
+    order -.->|/actuator/prometheus| PROM
+    inventory -.-> PROM
+    payment -.-> PROM
+```
+
+**사가는 두 방향으로 진행됩니다** — 정상 이벤트가 흐르는 전진 경로와, 무언가 멈췄을 때 이를 되돌리는 복구 경로. 후자를 3층 안전망으로 방어합니다:
+
+| 층 | 메커니즘 | 막는 실패 | 감지 계기 | 종착 상태 |
+|---|---|---|---|---|
+| ① | **Outbox + SKIP LOCKED** | DB 커밋은 됐는데 발행이 유실 | 커밋과 같은 트랜잭션 | (해당 없음) |
+| ② | **DLQ 복구** | 메시지는 왔지만 처리 확정 실패(poison) | 재시도 소진 **즉시** | `FAILED_POISON` |
+| ③ | **타임아웃 스위퍼** | 메시지가 아예 안 옴(침묵·유실) | N분 무갱신 폴링 | `TIMED_OUT` |
+
+②·③은 모두 `OrderService.failAndCompensate`로 수렴해 "주문 취소 + 사가 종착 마킹 + 재고 복원 보상"을 한 로컬 트랜잭션으로 처리합니다. 감지 계기만 다르고 종결 액션은 같습니다.
+
 ## 구현된 패턴과 위치
 
 | 패턴 | 문제 | 구현 위치 |
@@ -77,7 +144,7 @@ event-driven-msa-lab
 ## 기술 스택
 
 - Java 21 + Spring Boot 3 (Spring Web, Spring Data JPA, Spring Data Redis, Spring Kafka)
-- H2 (order/payment-service 각각 독립 DB) + Redis (inventory-service)
+- MySQL 8 (order/payment-service 각각 독립 DB, Testcontainers로 통합 테스트) + Redis (inventory-service)
 - Kafka (KRaft 모드) — 로컬 검증은 `docker-compose`, 통합 테스트는 `EmbeddedKafka`
 - Kubernetes (k3s 호환 클러스터 — OrbStack/k3d 등) + kustomize
 - ShedLock (DB 기반 분산 락)
@@ -162,13 +229,15 @@ sequenceDiagram
 | 6 | Spring Actuator + HTTP Probe + Ingress | ✅ |
 | 7 | ShedLock 분산 락 + 스케일아웃 | ✅ |
 | 8 | **Choreography Saga + inventory-service(Redis) + 보상 트랜잭션** | ✅ |
+| 9 | **분산 동시성 심화** — H2→MySQL, RDB 재고 원자차감, Outbox SKIP LOCKED, Redis vs RDB 벤치마크 | ✅ |
+| 10 | **사가 견고성** — SagaState 관측, 타임아웃 스위퍼, DLQ 기반 복구 | 🚧 |
 
 각 단계는 feature 브랜치 → PR(자동 코드리뷰) → main 머지 순서로 진행했습니다.
 
 ## 설계 원칙
 
 1. **공유 계약(event-contracts)은 비즈니스 로직 없이 작게 유지한다.**
-2. **서비스 경계는 저장소(DB)로도 분리한다** — order/payment는 각자 H2, inventory는 Redis.
+2. **서비스 경계는 저장소(DB)로도 분리한다** — order/payment는 각자 MySQL, inventory는 Redis.
 3. **강한 일관성보다 결과적 일관성을 택한다** — 2PC 대신 Outbox + 멱등성 + Saga 조합.
 4. **원자성이 필요한 다단계 작업은 단일 명령으로 묶는다** — Redis Lua 스크립트, 같은 DB 트랜잭션.
 5. **인프라는 저장소 안에서 재현 가능해야 한다** — kustomize 매니페스트, Helm values 모두 버전 관리.
