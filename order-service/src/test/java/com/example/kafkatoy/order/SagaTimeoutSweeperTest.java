@@ -124,6 +124,23 @@ class SagaTimeoutSweeperTest {
     }
 
     @Test
+    void lateConfirm_afterTimeout_doesNotResurrectOrder() throws InterruptedException {
+        OrderCreateResponse response = orderService.create(new OrderCreateRequest("user-1", "product-A", 1));
+        String orderId = response.orderId();
+        Thread.sleep(50);
+        sweeper.sweepStuckSagas(); // → TIMED_OUT + 주문 취소 + 재고 복원 보상 발행
+
+        // 뒤늦게 진짜 payment-completed가 도착해 confirm()이 불리는 상황.
+        orderService.confirm(orderId);
+
+        assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
+                .as("보상으로 재고가 이미 복원됐으므로 뒤늦은 결제 성공이 주문을 확정하면 안 된다")
+                .isEqualTo(OrderStatus.CANCELED);
+        assertThat(sagaStateRepository.findById(orderId).orElseThrow().getStatus())
+                .isEqualTo(SagaStatus.TIMED_OUT);
+    }
+
+    @Test
     void sweep_noStuckSagas_isNoOp() {
         // 아무 사가도 없거나 전부 종착이면 예외 없이 그냥 통과해야 한다.
         List<SagaState> before = sagaStateRepository.findByStatusInAndUpdatedAtBefore(

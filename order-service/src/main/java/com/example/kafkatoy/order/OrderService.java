@@ -58,6 +58,9 @@ public class OrderService {
 
     @Transactional
     public void confirm(String orderId) {
+        if (isSagaTerminal(orderId)) {
+            return;
+        }
         orderRepository.findById(orderId).ifPresent(order -> {
             order.confirm();
             orderRepository.save(order);
@@ -67,6 +70,9 @@ public class OrderService {
 
     @Transactional
     public void cancel(String orderId, SagaStatus terminalStatus) {
+        if (isSagaTerminal(orderId)) {
+            return;
+        }
         orderRepository.findById(orderId).ifPresent(order -> {
             order.cancel();
             orderRepository.save(order);
@@ -121,6 +127,21 @@ public class OrderService {
         outboxRepository.save(OutboxEvent.pending(
                 paymentFailedTopic, orderId, "PAYMENT_FAILED", serialize(compensation)));
         return true;
+    }
+
+    /**
+     * 종결된 사가는 되살리지 않는다.
+     *
+     * SagaState.transitionTo()에는 종착 가드가 있지만 Order에는 없어서, 타임아웃/DLQ 복구로
+     * 이미 취소·보상까지 끝난 주문에 뒤늦게 결제 결과가 도착하면 Order.status만 뒤집혀
+     * "재고는 복원됐는데 주문은 CONFIRMED"인 상태가 만들어진다. 그 유입을 여기서 막는다.
+     *
+     * 사가 기록이 없으면(이론상 create()를 거치지 않은 주문) 기존 동작대로 진행시킨다.
+     */
+    private boolean isSagaTerminal(String orderId) {
+        return sagaStateRepository.findById(orderId)
+                .map(saga -> saga.getStatus().isTerminal())
+                .orElse(false);
     }
 
     private void transitionSaga(String orderId, SagaStatus status) {
