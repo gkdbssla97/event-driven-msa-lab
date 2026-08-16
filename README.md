@@ -127,9 +127,25 @@ flowchart LR
 |---|---|---|---|---|
 | ① | **Outbox + SKIP LOCKED** | DB 커밋은 됐는데 발행이 유실 | 커밋과 같은 트랜잭션 | (해당 없음) |
 | ② | **DLQ 복구** | 메시지는 왔지만 처리 확정 실패(poison) | 재시도 소진 **즉시** | `FAILED_POISON` |
-| ③ | **타임아웃 스위퍼** | 메시지가 아예 안 옴(침묵·유실) | N분 무갱신 폴링 | `TIMED_OUT` |
+| ③ | **타임아웃 스위퍼** | 메시지가 아예 안 옴(침묵·유실) | **5분** 무갱신을 **60초**마다 폴링 | `TIMED_OUT` |
 
 ②·③은 모두 `OrderService.failAndCompensate`로 수렴해 "주문 취소 + 사가 종착 마킹 + 재고 복원 보상"을 한 로컬 트랜잭션으로 처리합니다. 감지 계기만 다르고 종결 액션은 같습니다.
+
+### 주요 설정값
+
+모두 환경변수/프로퍼티로 조절 가능하며, 아래는 기본값입니다.
+
+| 파라미터 | 기본값 | 설정 키 | 왜 이 값인가 |
+|---|---|---|---|
+| Outbox 폴링 주기 | **1초** | `app.outbox.poll-interval-ms` | 정합성의 대가로 받는 지연. 발행까지 최대 1초 |
+| Outbox 배치 크기 | 100 | `app.outbox.batch-size` | 한 번에 선점할 행 수 |
+| Outbox 선점 전략 | `skip-locked` | `app.outbox.strategy` | `shedlock`으로 전환 가능(직렬화 방식) |
+| 사가 스윕 주기 | **60초** | `app.saga.sweep-interval-ms` | 멈춘 사가를 훑는 주기 |
+| 사가 타임아웃 | **5분** | `app.saga.timeout-ms` | 이만큼 무갱신이면 "멈춤"으로 판정. **"죽음"과 "느림"을 구분할 수 없어 결국 추정값이고, 이 값이 그 추정의 손잡이다** |
+| inventory 재시도 | **1초 간격 3회** → DLQ | `FixedBackOff(1000, 3)` | 일시적 장애를 재시도로 흡수한 뒤 남는 것만 격리 |
+| payment 재시도 | **즉시 DLQ** | `FixedBackOff(0, 1)` | 재시도는 리스너 내부에서 자체 처리 |
+| ShedLock 락 유지 | `lockAtLeastFor=1s`, `lockAtMostFor=30s` | — | 파드가 죽어도 30초 뒤 락 해제 |
+| 재고 초기값 | 100 | `app.inventory.initial-stock` | — |
 
 ## 구현된 패턴과 위치
 
