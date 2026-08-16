@@ -60,11 +60,11 @@ flowchart LR
     subgraph order["order-service :8081"]
         direction TB
         OSVC["OrderController → OrderService"]
-        SAGA[("SagaState 테이블")]
-        OBX[("Outbox 테이블")]
-        PUB["OutboxPublisher<br/>SKIP LOCKED 병렬 폴링"]
-        SWEEP["SagaTimeoutSweeper<br/>침묵 사가 타임아웃 복구"]
-        DLQR["DlqRecoveryListener<br/>poison 즉시 복구"]
+        SAGA[("SagaState<br/>테이블")]
+        OBX[("Outbox<br/>테이블")]
+        PUB["① OutboxPublisher<br/>SKIP LOCKED 병렬 폴링"]
+        DLQR["② DlqRecoveryListener<br/>poison 즉시 복구"]
+        SWEEP["③ SagaTimeoutSweeper<br/>침묵 사가 타임아웃 복구"]
         OSVC --> SAGA
         OSVC --> OBX
         OBX --> PUB
@@ -103,7 +103,23 @@ flowchart LR
     order -.->|/actuator/prometheus| PROM
     inventory -.-> PROM
     payment -.-> PROM
+
+    classDef safety fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#3e2723
+    classDef svc fill:#bbdefb,stroke:#0d47a1,stroke-width:1px,color:#0d1b2a
+    classDef store fill:#e0e0e0,stroke:#424242,stroke-width:1px,color:#212121
+    classDef bus fill:#e1bee7,stroke:#6a1b9a,stroke-width:2px,color:#2e1a33
+    classDef edge fill:#c8e6c9,stroke:#1b5e20,stroke-width:1px,color:#12281a
+    classDef obsv fill:#fff9c4,stroke:#f57f17,stroke-width:1px,color:#33291a
+
+    class PUB,DLQR,SWEEP safety
+    class OSVC,ISVC,PSVC,WSVC svc
+    class ODB,PDB,RDS,SAGA,OBX store
+    class KFK bus
+    class Client,Browser edge
+    class PROM,GRAF obsv
 ```
+
+> 주황색 ①②③이 **사가 견고성 3층 안전망**입니다 — 아래 표와 번호가 대응합니다.
 
 **사가는 두 방향으로 진행됩니다** — 정상 이벤트가 흐르는 전진 경로와, 무언가 멈췄을 때 이를 되돌리는 복구 경로. 후자를 3층 안전망으로 방어합니다:
 
