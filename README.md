@@ -9,6 +9,17 @@ Kafka 기반 이벤트 드리븐 MSA에서 실제로 마주치는 분산 시스�
 - 처리할 수 없는 메시지를 무한 재시도하지 않으려면 → **DLQ (Dead Letter Queue)**
 - 여러 인스턴스가 동시에 폴링해도 중복 발행이 안 되려면 → **분산 락 (ShedLock)**
 - RDB(주문/결제)와 NoSQL(Redis 재고)에 걸친 트랜잭션을 2PC 없이 처리하려면 → **Choreography Saga + 보상 트랜잭션**
+- 그렇게 만든 사가가 **중간에 멈추면** 어떻게 알아채고 되살릴 것인가 → **SagaState + DLQ 복구 + 타임아웃 스위퍼**
+
+### 실측으로 확인한 것
+
+| 무엇을 | 어떻게 | 결과 |
+|---|---|---|
+| 재고 원자 차감 | Redis Lua vs RDB 조건부 UPDATE, 5000건 / 30스레드 단일 상품 경합 | **2,069 vs 161 ops/sec (~12.9배)** — [벤치마크](docs/benchmarks/inventory-redis-vs-rdb.md) |
+| 오버셀 방지 | 50스레드 동시 차감 + k6 부하 테스트 (배포 환경) | **초과 판매 0건** |
+| Outbox 병렬 발행 | `SELECT ... FOR UPDATE SKIP LOCKED` | 파드별 **겹치지 않는(disjoint) 배치** 확보 — 단, `(status, created_at)` 인덱스 없으면 PENDING 전체가 잠김 |
+
+> 이 프로젝트에서 실제로 잡은 버그들: 보상 트랜잭션의 부분 실패(→ Lua 원자화), 멱등성 가드가 만든 사가 영구 정지(→ 스킵이 아니라 리플레이), 아무도 구독하지 않던 이벤트, `.DLT`/`.DLQ` 조용한 불일치, 종결된 사가를 되살리던 가드 누락. 각 과정은 블로그 시리즈에 정리했습니다.
 
 ## 한눈에 보는 이벤트 흐름
 
@@ -108,15 +119,17 @@ flowchart LR
 
 | 패턴 | 문제 | 구현 위치 |
 |---|---|---|
-| **Outbox** | RDB 저장과 Kafka 발행의 원자성 | [`OutboxEvent`](order-service/src/main/java/com/example/kafkatoy/order/OutboxEvent.java), [`OutboxPublisher`](order-service/src/main/java/com/example/kafkatoy/order/OutboxPublisher.java) |
-| **멱등성** | Kafka at-least-once로 인한 중복 처리 | [`PaymentService.process()`](payment-service/src/main/java/com/example/kafkatoy/payment/PaymentService.java) — `existsById` 체크 |
+| **Outbox** | RDB 저장과 Kafka 발행의 원자성 (dual write) | [`OutboxEvent`](order-service/src/main/java/com/example/kafkatoy/order/OutboxEvent.java), [`OutboxDispatcher`](order-service/src/main/java/com/example/kafkatoy/order/OutboxDispatcher.java) |
+| **SKIP LOCKED 폴링** | 분산 락 없이, 여러 파드가 **병렬로** 중복 없이 발행 | [`SkipLockedOutboxPublisher`](order-service/src/main/java/com/example/kafkatoy/order/SkipLockedOutboxPublisher.java) (기본) / [`ShedLockOutboxPublisher`](order-service/src/main/java/com/example/kafkatoy/order/ShedLockOutboxPublisher.java) (직렬화 대안, `app.outbox.strategy`로 전환) |
+| **멱등성** | Kafka at-least-once로 인한 중복 처리 | [`PaymentService`](payment-service/src/main/java/com/example/kafkatoy/payment/PaymentService.java) — DB 기반 중복 판정 / [`InventoryStore.claim()`](inventory-service/src/main/java/com/example/kafkatoy/inventory/InventoryStore.java) — 중복 시 **스킵이 아니라 저장된 결과를 재발행(replay)** |
 | **DLQ** | 처리 불가 메시지의 무한 재시도 방지 | [`KafkaConsumerConfig`](payment-service/src/main/java/com/example/kafkatoy/payment/KafkaConsumerConfig.java) — `DefaultErrorHandler` + `DeadLetterPublishingRecoverer` |
-| **분산 락 (ShedLock)** | 여러 인스턴스의 Outbox 폴링 중복 실행 | [`ShedLockConfig`](order-service/src/main/java/com/example/kafkatoy/order/ShedLockConfig.java) |
-| **Saga + 보상 트랜잭션** | RDB/Redis에 걸친 분산 트랜잭션 | [`InventoryService.reserve()/compensate()`](inventory-service/src/main/java/com/example/kafkatoy/inventory/InventoryService.java) — Lua 스크립트로 원자적 재고 차감/복원 |
+| **Saga + 보상 트랜잭션** | RDB/Redis에 걸친 분산 트랜잭션 | [`PaymentFailedEventListener`](inventory-service/src/main/java/com/example/kafkatoy/inventory/PaymentFailedEventListener.java) — 결제 실패 수신 시 재고 복원 / [`RedisInventoryStore`](inventory-service/src/main/java/com/example/kafkatoy/inventory/RedisInventoryStore.java) — `INCRBY + DEL`을 단일 Lua로 묶어 이중 복원 방지 |
+| **재고 원자 차감 2종** | 같은 문제를 Redis / RDB 양쪽으로 구현해 비교 | [`RedisInventoryStore`](inventory-service/src/main/java/com/example/kafkatoy/inventory/RedisInventoryStore.java) (Lua) / [`JdbcInventoryStore`](inventory-service/src/main/java/com/example/kafkatoy/inventory/JdbcInventoryStore.java) (`UPDATE ... WHERE stock >= ?`) |
+| **SagaState** | 사가 상태가 세 서비스에 흩어져 "어디서 멈췄나"를 못 봄 | [`SagaState`](order-service/src/main/java/com/example/kafkatoy/order/SagaState.java), [`SagaMetrics`](order-service/src/main/java/com/example/kafkatoy/order/SagaMetrics.java) — `saga.count{status}` 게이지 |
+| **타임아웃 스위퍼** | 응답이 **아예 안 와서** 멈춘 사가의 자동 취소·보상 | [`SagaTimeoutSweeper`](order-service/src/main/java/com/example/kafkatoy/order/SagaTimeoutSweeper.java) |
+| **DLQ 기반 복구** | 처리가 **확정 실패**한 메시지를 즉시 보상 | [`DlqRecoveryListener`](order-service/src/main/java/com/example/kafkatoy/order/DlqRecoveryListener.java) |
 | **실시간 알림** | 비동기 처리 결과를 클라이언트에 전달 | [`websocket-service`](websocket-service) — Spring WebSocket + STOMP |
 | **Actuator Probe** | k8s readiness/liveness로 안전한 롤링 배포 | 각 서비스 `application.yml` + `infra/k3s/apps/*.yaml` |
-
-> 보상 트랜잭션의 원자성 버그(재고 복원과 예약 삭제가 부분 실패할 수 있던 문제)를 코드리뷰로 발견하고 Lua 스크립트로 고친 과정은 [`docs/blog-idempotency-and-outbox.md`](docs/blog-idempotency-and-outbox.md)에 정리했습니다.
 
 ## 모듈 구조
 
@@ -230,7 +243,7 @@ sequenceDiagram
 | 7 | ShedLock 분산 락 + 스케일아웃 | ✅ |
 | 8 | **Choreography Saga + inventory-service(Redis) + 보상 트랜잭션** | ✅ |
 | 9 | **분산 동시성 심화** — H2→MySQL, RDB 재고 원자차감, Outbox SKIP LOCKED, Redis vs RDB 벤치마크 | ✅ |
-| 10 | **사가 견고성** — SagaState 관측, 타임아웃 스위퍼, DLQ 기반 복구 | 🚧 |
+| 10 | **사가 견고성** — SagaState 관측, 타임아웃 스위퍼, DLQ 기반 복구, 종결 상태 가드 | ✅ |
 
 각 단계는 feature 브랜치 → PR(자동 코드리뷰) → main 머지 순서로 진행했습니다.
 
