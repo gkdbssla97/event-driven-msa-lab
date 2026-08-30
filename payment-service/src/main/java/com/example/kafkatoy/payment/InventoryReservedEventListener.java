@@ -1,8 +1,6 @@
 package com.example.kafkatoy.payment;
 
 import com.example.kafkatoy.contracts.InventoryReservedEvent;
-import com.example.kafkatoy.contracts.PaymentCompletedEvent;
-import com.example.kafkatoy.contracts.PaymentFailedEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -18,19 +16,10 @@ public class InventoryReservedEventListener {
 
     private final ObjectMapper objectMapper;
     private final PaymentService paymentService;
-    private final PaymentCompletedEventPublisher paymentCompletedEventPublisher;
-    private final PaymentFailedEventPublisher paymentFailedEventPublisher;
 
-    public InventoryReservedEventListener(
-            ObjectMapper objectMapper,
-            PaymentService paymentService,
-            PaymentCompletedEventPublisher paymentCompletedEventPublisher,
-            PaymentFailedEventPublisher paymentFailedEventPublisher
-    ) {
+    public InventoryReservedEventListener(ObjectMapper objectMapper, PaymentService paymentService) {
         this.objectMapper = objectMapper;
         this.paymentService = paymentService;
-        this.paymentCompletedEventPublisher = paymentCompletedEventPublisher;
-        this.paymentFailedEventPublisher = paymentFailedEventPublisher;
     }
 
     @KafkaListener(topics = "${app.kafka.topics.inventory-reserved}", groupId = "${spring.kafka.consumer.group-id}")
@@ -39,22 +28,20 @@ public class InventoryReservedEventListener {
         log.info("Received inventory-reserved: orderId={}", event.orderId());
 
         try {
-            PaymentCompletedEvent completedEvent = processWithRetry(event);
-            paymentCompletedEventPublisher.publish(completedEvent);
-            log.info("Published payment-completed: orderId={}", completedEvent.orderId());
+            processWithRetry(event);
         } catch (Exception e) {
-            log.error("Payment failed after {} retries, publishing payment-failed: orderId={}", MAX_RETRY, event.orderId());
-            paymentFailedEventPublisher.publish(
-                    PaymentFailedEvent.of(event.orderId(), event.userId(), e.getMessage())
-            );
+            log.error("Payment failed after {} retries, recording payment-failed via outbox: orderId={}",
+                    MAX_RETRY, event.orderId());
+            paymentService.recordFailure(event.orderId(), event.userId(), e.getMessage());
         }
     }
 
-    private PaymentCompletedEvent processWithRetry(InventoryReservedEvent event) {
+    private void processWithRetry(InventoryReservedEvent event) {
         int attempt = 0;
         while (true) {
             try {
-                return paymentService.process(event);
+                paymentService.process(event);
+                return;
             } catch (Exception e) {
                 attempt++;
                 if (attempt >= MAX_RETRY) throw e;
