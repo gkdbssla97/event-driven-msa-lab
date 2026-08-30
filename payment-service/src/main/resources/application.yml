@@ -51,3 +51,6 @@ app:
       payment-completed: payment-completed
       payment-failed: payment-failed
       order-created-dlq: order-created.DLQ
+  payment:
+    # 실제 상품 카탈로그가 없어 quantity당 고정 단가로 원장 금액을 계산한다 (ledger-lite 스코프).
+    unit-price-krw: ${PAYMENT_UNIT_PRICE_KRW:10000}
