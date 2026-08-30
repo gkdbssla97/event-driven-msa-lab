@@ -20,7 +20,10 @@ spring:
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # Outbox 도입 후 OutboxDispatcher가 미리 직렬화된 JSON 문자열을 그대로 보낸다
+      # (order-service와 동일한 방식). 더 이상 타입 객체를 직접 보내는 곳이 없어
+      # JsonSerializer가 불필요해졌다.
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
 server:
   port: 8082
@@ -54,3 +57,5 @@ app:
   payment:
     # 실제 상품 카탈로그가 없어 quantity당 고정 단가로 원장 금액을 계산한다 (ledger-lite 스코프).
     unit-price-krw: ${PAYMENT_UNIT_PRICE_KRW:10000}
+  outbox:
+    batch-size: 100
