@@ -24,7 +24,9 @@ MAX_INLINE_COMMENTS = 20
 BATCH_CALL_DELAY_SECONDS = 3
 
 DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/'
-DEFAULT_MODEL = 'gemini-3.6-flash'
+# 앞 모델이 과부하(503)·호출 한도(429)·접근 불가(403/404)면 다음 모델로 넘어간다
+DEFAULT_MODELS = 'gemini-3.6-flash,gemini-3.1-flash-lite'
+FALLBACK_STATUS_CODES = {403, 404, 429, 503}
 
 SUMMARY_MARKER = '<!-- ai-code-review -->'
 FP_PATTERN = re.compile(r'<!-- ai-review-fp:([0-9a-f]{12}) -->')
@@ -181,6 +183,19 @@ def call_model(client, model: str, batch: str) -> dict:
     return json.loads(response.choices[0].message.content)
 
 
+def review_batch(client, models: List[str], batch: str) -> Tuple[dict, str]:
+    """모델을 순서대로 시도해 (리뷰 결과, 사용한 모델)을 돌려준다."""
+    from openai import APIStatusError
+    for i, model in enumerate(models):
+        try:
+            return call_model(client, model, batch), model
+        except APIStatusError as e:
+            if e.status_code not in FALLBACK_STATUS_CODES or i == len(models) - 1:
+                raise
+            print(f'::warning::{model} unavailable ({e.status_code}) — falling back to {models[i + 1]}')
+    raise ValueError('no model configured')
+
+
 def fingerprint(path: str, title: str) -> str:
     """같은 파일의 같은 문제는 라인이 밀려도 같은 값이 되도록 라인 번호는 넣지 않는다."""
     normalized = ' '.join(title.lower().split())
@@ -299,17 +314,19 @@ def main() -> None:
     # 무료 등급은 수요 급증 시 503·429가 잦아 SDK 기본(2회)보다 넉넉히 재시도한다 (지수 백오프는 SDK가 처리)
     client = OpenAI(api_key=api_key, base_url=os.environ.get('AI_REVIEW_BASE_URL') or DEFAULT_BASE_URL,
                     max_retries=5)
-    model = os.environ.get('AI_REVIEW_MODEL') or DEFAULT_MODEL
+    models = [m.strip() for m in (os.environ.get('AI_REVIEW_MODEL') or DEFAULT_MODELS).split(',') if m.strip()]
 
     batches = make_batches(annotated)
-    print(f'{len(files)} file(s) changed -> {len(batches)} review batch(es) with {model}')
+    print(f'{len(files)} file(s) changed -> {len(batches)} review batch(es), models: {models}')
 
     summaries: List[str] = []
     candidates: List[dict] = []
+    used_models: List[str] = []
     try:
         for i, batch in enumerate(batches, start=1):
             print(f'Reviewing batch {i}/{len(batches)} ({len(batch)} chars)...')
-            result = call_model(client, model, batch)
+            result, used = review_batch(client, models, batch)
+            used_models.append(used)
             summaries.append(result['summary'])
             candidates.extend(result['comments'])
             if i < len(batches):
@@ -328,7 +345,7 @@ def main() -> None:
 
     summary = '\n\n'.join(summaries)
     post_or_update_summary(token, repo, pr_number,
-                           f'## 🤖 AI 코드리뷰 ({model})\n\n{summary}\n\n'
+                           f'## 🤖 AI 코드리뷰 ({", ".join(sorted(set(used_models)))})\n\n{summary}\n\n'
                            f'<sub>새 지적 {len(comments)}건 · 이미 단 지적 {duplicate}건 생략 · '
                            f'diff 밖 라인 지적 {invalid}건 제외</sub>')
 

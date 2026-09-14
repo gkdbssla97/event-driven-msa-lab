@@ -6,8 +6,9 @@ on:
   workflow_call:
     inputs:
       model:
+        description: 쉼표로 구분한 모델 목록 — 앞 모델이 과부하·접근 불가면 다음 모델로 대체
         type: string
-        default: gemini-3.6-flash
+        default: gemini-3.6-flash,gemini-3.1-flash-lite
       base-url:
         description: OpenAI 호환 API 주소 — 모델 서비스가 바뀌어도 코드 수정 없이 교체
         type: string
