@@ -238,7 +238,7 @@ def github_request(method: str, url: str, token: str, body: Optional[dict] = Non
     req.add_header('Accept', 'application/vnd.github+json')
     if data is not None:
         req.add_header('Content-Type', 'application/json')
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read() or b'null')
 
 
