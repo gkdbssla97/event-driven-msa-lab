@@ -296,7 +296,9 @@ def main() -> None:
         return
 
     from openai import OpenAI  # 테스트가 SDK 없이 돌도록 실제 호출 시점에만 불러온다
-    client = OpenAI(api_key=api_key, base_url=os.environ.get('AI_REVIEW_BASE_URL') or DEFAULT_BASE_URL)
+    # 무료 등급은 수요 급증 시 503·429가 잦아 SDK 기본(2회)보다 넉넉히 재시도한다 (지수 백오프는 SDK가 처리)
+    client = OpenAI(api_key=api_key, base_url=os.environ.get('AI_REVIEW_BASE_URL') or DEFAULT_BASE_URL,
+                    max_retries=5)
     model = os.environ.get('AI_REVIEW_MODEL') or DEFAULT_MODEL
 
     batches = make_batches(annotated)
