@@ -1,6 +1,6 @@
 import unittest
 
-from review import annotate_file_diff, fingerprint, make_batches, select_comments
+from review import annotate_file_diff, extract_posted, fingerprint, make_batches, select_comments
 
 FILE_DIFF = """diff --git a/Order.java b/Order.java
 --- a/Order.java
@@ -74,6 +74,21 @@ class MakeBatchesTest(unittest.TestCase):
             self.assertEqual(make_batches(['aaaa', 'bbbb', 'cccc']), ['aaaabbbb', 'cccc'])
         finally:
             review.MAX_BATCH_CHARS = original
+
+
+class ExtractPostedTest(unittest.TestCase):
+
+    def test_collects_only_bot_findings_with_location_and_title(self):
+        comments = [
+            {'path': 'A.java', 'line': 3,
+             'body': '**[P3] 타임아웃 누락**\n\n설명\n\n<!-- ai-review-fp:0123456789ab -->'},
+            {'path': 'A.java', 'line': 9, 'body': '사람이 단 댓글'},
+        ]
+
+        fps, findings = extract_posted(comments)
+
+        self.assertEqual(fps, {'0123456789ab'})
+        self.assertEqual(findings, ['A.java:3 [P3] 타임아웃 누락'])
 
 
 if __name__ == '__main__':

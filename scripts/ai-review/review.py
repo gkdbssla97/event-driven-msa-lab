@@ -171,24 +171,29 @@ def make_batches(file_diffs: List[str]) -> List[str]:
     return batches
 
 
-def call_model(client, model: str, batch: str) -> dict:
+def call_model(client, model: str, batch: str, already_posted: List[str]) -> dict:
+    user_content = f'아래 PR diff를 리뷰해주세요:\n\n```diff\n{batch}\n```'
+    if already_posted:
+        # LLM은 같은 문제도 실행마다 다른 제목으로 쓰기 때문에, 제목 fingerprint만으로는 중복을 못 거른다
+        user_content += ('\n\n이 PR에 이미 단 지적입니다. 표현이 다르더라도 같은 문제는 다시 지적하지 마세요:\n'
+                         + '\n'.join(f'- {finding}' for finding in already_posted))
     response = client.chat.completions.create(
         model=model,
         messages=[
             {'role': 'system', 'content': SYSTEM_PROMPT},
-            {'role': 'user', 'content': f'아래 PR diff를 리뷰해주세요:\n\n```diff\n{batch}\n```'},
+            {'role': 'user', 'content': user_content},
         ],
         response_format=RESPONSE_FORMAT,
     )
     return json.loads(response.choices[0].message.content)
 
 
-def review_batch(client, models: List[str], batch: str) -> Tuple[dict, str]:
+def review_batch(client, models: List[str], batch: str, already_posted: List[str]) -> Tuple[dict, str]:
     """모델을 순서대로 시도해 (리뷰 결과, 사용한 모델)을 돌려준다."""
     from openai import APIStatusError
     for i, model in enumerate(models):
         try:
-            return call_model(client, model, batch), model
+            return call_model(client, model, batch, already_posted), model
         except APIStatusError as e:
             if e.status_code not in FALLBACK_STATUS_CODES or i == len(models) - 1:
                 raise
@@ -242,16 +247,30 @@ def github_request(method: str, url: str, token: str, body: Optional[dict] = Non
         return json.loads(resp.read() or b'null')
 
 
-def posted_fingerprints(token: str, repo: str, pr_number: str) -> Set[str]:
+def extract_posted(comments: List[dict]) -> Tuple[Set[str], List[str]]:
+    """봇이 이미 단 인라인 지적에서 (fingerprint 집합, 'path:line 제목' 목록)을 뽑는다."""
     fps: Set[str] = set()
+    findings: List[str] = []
+    for comment in comments:
+        body = comment.get('body', '')
+        found = FP_PATTERN.findall(body)
+        if not found:
+            continue  # 사람이 단 댓글
+        fps.update(found)
+        title = body.split('\n', 1)[0].strip('* ')
+        findings.append(f"{comment.get('path')}:{comment.get('line')} {title}")
+    return fps, findings
+
+
+def fetch_review_comments(token: str, repo: str, pr_number: str) -> List[dict]:
+    comments: List[dict] = []
     page = 1
     while True:
         url = f'https://api.github.com/repos/{repo}/pulls/{pr_number}/comments?per_page=100&page={page}'
-        comments = github_request('GET', url, token)
-        if not comments:
-            return fps
-        for comment in comments:
-            fps.update(FP_PATTERN.findall(comment.get('body', '')))
+        page_comments = github_request('GET', url, token)
+        if not page_comments:
+            return comments
+        comments.extend(page_comments)
         page += 1
 
 
@@ -318,6 +337,7 @@ def main() -> None:
 
     batches = make_batches(annotated)
     print(f'{len(files)} file(s) changed -> {len(batches)} review batch(es), models: {models}')
+    posted_fps, posted_findings = extract_posted(fetch_review_comments(token, repo, pr_number))
 
     summaries: List[str] = []
     candidates: List[dict] = []
@@ -325,7 +345,7 @@ def main() -> None:
     try:
         for i, batch in enumerate(batches, start=1):
             print(f'Reviewing batch {i}/{len(batches)} ({len(batch)} chars)...')
-            result, used = review_batch(client, models, batch)
+            result, used = review_batch(client, models, batch, posted_findings)
             used_models.append(used)
             summaries.append(result['summary'])
             candidates.extend(result['comments'])
@@ -339,7 +359,7 @@ def main() -> None:
         return
 
     comments, invalid, duplicate = select_comments(
-        candidates, commentable, posted_fingerprints(token, repo, pr_number))
+        candidates, commentable, posted_fps)
     if comments:
         post_review(token, repo, pr_number, head_sha, comments)
 
