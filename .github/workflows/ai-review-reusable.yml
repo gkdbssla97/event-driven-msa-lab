@@ -7,7 +7,7 @@ on:
     inputs:
       model:
         type: string
-        default: gemini-3.8-flash
+        default: gemini-2.5-flash
       base-url:
         description: OpenAI 호환 API 주소 — 모델 서비스가 바뀌어도 코드 수정 없이 교체
         type: string

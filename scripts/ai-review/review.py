@@ -24,7 +24,7 @@ MAX_INLINE_COMMENTS = 20
 BATCH_CALL_DELAY_SECONDS = 3
 
 DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/'
-DEFAULT_MODEL = 'gemini-3.8-flash'
+DEFAULT_MODEL = 'gemini-2.5-flash'
 
 SUMMARY_MARKER = '<!-- ai-code-review -->'
 FP_PATTERN = re.compile(r'<!-- ai-review-fp:([0-9a-f]{12}) -->')
