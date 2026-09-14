@@ -1,0 +1,56 @@
+name: AI Code Review (reusable)
+
+# 다른 레포에서 한 줄로 가져다 쓰는 PR 자동 코드리뷰.
+# 호출하는 쪽 워크플로에 permissions(pull-requests: write, contents: read)가 있어야 한다.
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: 쉼표로 구분한 모델 목록 — 앞 모델이 과부하·접근 불가면 다음 모델로 대체
+        type: string
+        default: gemini-3.6-flash,gemini-3.1-flash-lite
+      base-url:
+        description: OpenAI 호환 API 주소 — 모델 서비스가 바뀌어도 코드 수정 없이 교체
+        type: string
+        default: https://generativelanguage.googleapis.com/v1beta/openai/
+      reviewer-ref:
+        description: 리뷰 스크립트를 가져올 이 레포의 ref
+        type: string
+        default: main
+    secrets:
+      AI_REVIEW_API_KEY:
+        required: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: gkdbssla97/event-driven-msa-lab
+          ref: ${{ inputs.reviewer-ref }}
+          path: .ai-review
+          sparse-checkout: scripts/ai-review
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r .ai-review/scripts/ai-review/requirements.txt
+
+      - name: Run AI Code Review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          AI_REVIEW_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
+          AI_REVIEW_MODEL: ${{ inputs.model }}
+          AI_REVIEW_BASE_URL: ${{ inputs.base-url }}
+        run: python .ai-review/scripts/ai-review/review.py
