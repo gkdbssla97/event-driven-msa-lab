@@ -7,29 +7,12 @@ on:
 permissions:
   pull-requests: write
   contents: read
-  models: read
 
 jobs:
   review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: pip install -r scripts/ai-review/requirements.txt
-
-      - name: Run AI Code Review
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python scripts/ai-review/review.py
+    uses: ./.github/workflows/ai-review-reusable.yml
+    with:
+      # 이 레포의 PR은 PR 브랜치의 리뷰 스크립트로 리뷰 (스크립트 변경을 PR 안에서 바로 검증)
+      reviewer-ref: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      AI_REVIEW_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
