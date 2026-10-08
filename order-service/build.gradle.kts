@@ -20,5 +20,6 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:mysql")
     testImplementation("org.testcontainers:kafka")
+    testImplementation("io.projectreactor:reactor-core")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
