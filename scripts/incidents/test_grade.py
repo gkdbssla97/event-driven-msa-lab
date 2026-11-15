@@ -7,7 +7,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from grade import EXPECTED, grade  # noqa: E402
+from grade import EXPECTED, grade, load_report  # noqa: E402
 
 
 def report(component, category, is_incident=True, confidence=0.9, sources=("db",)):
@@ -79,6 +79,29 @@ class GradeTest(unittest.TestCase):
                   EXPECTED["S1"])
         self.assertTrue(g["hit"])
         self.assertIn("확신도 낮음(0.3)", g["flags"])
+
+    def test_후보가_없으면_오답으로_처리(self):
+        g = grade({"summary": "-", "is_incident": True, "candidates": []}, EXPECTED["S1"])
+        self.assertFalse(g["hit"])
+        self.assertEqual(g["flags"], ["원인 후보 없음"])
+
+
+class LoadReportTest(unittest.TestCase):
+
+    def test_구조화_출력을_우선한다(self):
+        self.assertEqual(load_report({"structured_output": {"a": 1}, "result": "{}"}), {"a": 1})
+
+    def test_result_텍스트에서_JSON을_꺼낸다(self):
+        self.assertEqual(load_report({"result": '결과입니다 {"a": 1} 끝'}), {"a": 1})
+
+    def test_result에_JSON이_없으면_ValueError(self):
+        for raw in ({"result": "API Error: 429"}, {"result": None}, {}, {"result": "} 거꾸로 {"}):
+            with self.assertRaises(ValueError):
+                load_report(raw)
+
+    def test_result의_JSON이_깨졌으면_ValueError(self):
+        with self.assertRaises(ValueError):
+            load_report({"result": "{not json}"})
 
 
 if __name__ == "__main__":
