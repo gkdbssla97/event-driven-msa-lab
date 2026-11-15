@@ -224,9 +224,24 @@ Outbox 행은 적재 시점의 토픽 이름을 `topic` 컬럼에 저장합니�
 - 원인 후보를 "장애"로 내는 것 자체가 오답입니다(예: "inventory-service 오류", "재고 데이터 손상").
 - WARN 로그 한 줄을 근거로 높은 확신도의 장애를 보고하는 것.
 
-## 7. 채점 기준 초안(2단계용)
+## 7. 채점 기준
 
-리포트 JSON의 원인 후보 1순위를 기준으로 채점합니다.
+리포트 JSON의 원인 후보 1순위를 기준으로 채점합니다. 판정 로직은 `scripts/incidents/grade.py`에 있고, 오프라인 테스트는 `python3 -m unittest scripts/incidents/test_grade.py`로 돌립니다. `diagnose.sh`를 실행할 때마다 채점 요약이 `build/incidents/reports/scores.jsonl`에 한 줄씩 쌓여 적중률을 집계할 수 있습니다.
+
+### 시나리오별 판정 값
+
+리포트의 `component`와 `category`는 `diagnose.sh`가 넘기는 JSON Schema의 enum 값입니다. 1순위 후보가 아래 값이고 `is_incident`도 맞으면 적중입니다.
+
+| ID | is_incident | component | category | 필수 증거 출처(`evidence.source`) | 혼동 표시 |
+|---|---|---|---|---|---|
+| S1 | true | payment-service | service_down | health, db | payment-service/config_error: S3와 혼동 |
+| S2 | true | order-service 또는 inventory-service | poison_message | dlq | inventory-service/business_failure: S4와 혼동, inventory-service/code_defect: 부수 증상(보상 IOOBE)을 원인으로 봄 |
+| S3 | true | payment-service | config_error | db, logs | payment-service/service_down: S1과 혼동, kafka/broker_issue: 브로커 장애로 오판 |
+| S4 | false | inventory-service 또는 none | business_failure | db | 장애로 보고하면 오탐 |
+
+S2는 깨진 payload를 만든 쪽(order-service Outbox)과 처리하지 못한 쪽(inventory-service)을 모두 정답으로 인정합니다. 확신도는 적중했는데 0.5 미만이면 "확신도 낮음", 오답인데 0.7 이상이면 "과신"으로 표시합니다. S4에서 장애를 0.7 이상으로 보고하면 "최대 감점"으로 따로 표시합니다.
+
+### 항목별 기준
 
 | 항목 | 기준 |
 |---|---|
