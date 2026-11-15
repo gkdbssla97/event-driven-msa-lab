@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 진단 프로토타입: 장애 실행 기록 하나를 받아 claude -p 로 원인을 진단하고 정답표 기준으로 채점한다.
 #
-#   scripts/incidents/s1-payment-down.sh --no-restore      # 장애 상태를 유지한 채로
+#   scripts/incidents/s1-payment-down.sh --no-restore      # 장애 상태를 유지한 채로(S3도 --no-restore, S2·S4는 그대로)
 #   scripts/incidents/diagnose.sh build/incidents/runs/S1-<UTC>.json
 #   scripts/incidents/local-stack.sh start payment-service # 진단 후 복구
 #
@@ -10,6 +10,7 @@
 #       레포 소스와 정답표(docs/incidents/answer-key.md)는 진단 모델이 읽을 수 없다.
 # 환경변수: DIAG_MODEL(기본 sonnet, 예: opus), DIAG_TIMEOUT_S(기본 600)
 # 결과: build/incidents/reports/<실행기록 이름>.{raw.json,report.json,grade.txt}
+#       채점 요약은 build/incidents/reports/scores.jsonl 에 한 줄씩 쌓인다(적중률 집계용, 기준은 grade.py).
 
 source "$(dirname "$0")/lib.sh"
 
@@ -114,42 +115,5 @@ log "완료 ($((SECONDS - start))s)"
 rmdir "$workdir" 2>/dev/null || true
 
 section "리포트와 채점"
-python3 - "$REPORT_DIR/$name.raw.json" "$REPORT_DIR/$name.report.json" "$scenario" <<'PY' | tee "$REPORT_DIR/$name.grade.txt"
-import json, sys
-raw_path, report_path, scenario = sys.argv[1:4]
-raw = json.load(open(raw_path))
-report = raw.get("structured_output")
-if report is None:  # 구조화 출력이 없으면 result 텍스트에서 JSON을 찾아 본다
-    text = raw.get("result", "")
-    report = json.loads(text[text.find("{"):text.rfind("}") + 1])
-json.dump(report, open(report_path, "w"), ensure_ascii=False, indent=2)
-
-print(f"요약: {report['summary']}")
-print(f"장애 여부: {report['is_incident']}")
-for c in report["candidates"]:
-    print(f"\n#{c['rank']} [{c['component']} / {c['category']}] 확신도 {c['confidence']}")
-    print(f"  원인: {c['cause']}")
-    for e in c["evidence"]:
-        print(f"  - ({e['source']}) {e['detail']}")
-
-# 정답표(docs/incidents/answer-key.md 7절)의 프로토타입 판정. 지금은 S1만 기준이 있다.
-EXPECTED = {
-    "S1": {"is_incident": True, "component": "payment-service", "category": "service_down",
-           "required_sources": {"health", "db"}},
-}
-print("\n--- 채점 ---")
-exp = EXPECTED.get(scenario)
-if exp is None:
-    print(f"{scenario}: 채점 기준 미구현")
-    sys.exit(0)
-top = min(report["candidates"], key=lambda c: c["rank"])
-hit = (report["is_incident"] == exp["is_incident"]
-       and top["component"] == exp["component"] and top["category"] == exp["category"])
-sources = {e["source"] for e in top["evidence"]}
-missing = exp["required_sources"] - sources
-print(f"원인 적중: {'O' if hit else 'X'} (1순위 {top['component']}/{top['category']}, 정답 {exp['component']}/{exp['category']})")
-print(f"필수 증거 출처: {'충족' if not missing else '누락 ' + ','.join(sorted(missing))} (인용 {','.join(sorted(sources))})")
-print(f"확신도: {top['confidence']}")
-usage = raw.get("usage", {})
-print(f"턴 수: {raw.get('num_turns')}, 소요: {raw.get('duration_ms')}ms, 출력 토큰: {usage.get('output_tokens')}")
-PY
+python3 "$INCIDENT_DIR/grade.py" "$REPORT_DIR/$name.raw.json" "$REPORT_DIR/$name.report.json" "$scenario" \
+  "$REPORT_DIR/scores.jsonl" | tee "$REPORT_DIR/$name.grade.txt"
