@@ -8,7 +8,7 @@
 # 인증: 구독 로그인을 쓴다(--bare 미사용). ANTHROPIC_API_KEY 가 설정돼 있으면 API 과금으로 바뀌므로 중단한다.
 # 격리: 빈 임시 디렉터리에서 실행하고 도구는 Bash 하나, 그중 diag-tool.sh 만 허용한다.
 #       레포 소스와 정답표(docs/incidents/answer-key.md)는 진단 모델이 읽을 수 없다.
-# 환경변수: DIAG_MODEL(예: sonnet, opus), DIAG_TIMEOUT_S(기본 600)
+# 환경변수: DIAG_MODEL(기본 sonnet, 예: opus), DIAG_TIMEOUT_S(기본 600)
 # 결과: build/incidents/reports/<실행기록 이름>.{raw.json,report.json,grade.txt}
 
 source "$(dirname "$0")/lib.sh"
@@ -102,12 +102,13 @@ args=(-p "$PROMPT"
   --allowedTools "Bash($TOOL *)"
   --strict-mcp-config --mcp-config '{"mcpServers":{}}'
   --no-session-persistence)
-[[ -n "${DIAG_MODEL:-}" ]] && args+=(--model "$DIAG_MODEL")
+# 사용자 기본 모델이 1M 컨텍스트 버전이면 구독(Pro)에서는 사용 크레딧 없이 429가 난다. 표준 컨텍스트 모델로 고정한다.
+args+=(--model "${DIAG_MODEL:-sonnet}")
 
 # timeout 은 macOS 기본 명령이 아니라(coreutils) 있을 때만 건다.
 to=(); command -v timeout >/dev/null && to=(timeout "${DIAG_TIMEOUT_S:-600}")
 start=$SECONDS
-( cd "$workdir" && "${to[@]}" claude "${args[@]}" ) > "$REPORT_DIR/$name.raw.json" \
+( cd "$workdir" && "${to[@]}" claude "${args[@]}" < /dev/null ) > "$REPORT_DIR/$name.raw.json" \
   || { log "claude -p 실패(exit $?). $REPORT_DIR/$name.raw.json 확인"; exit 1; }
 log "완료 ($((SECONDS - start))s)"
 rmdir "$workdir" 2>/dev/null || true
