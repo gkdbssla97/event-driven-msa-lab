@@ -51,14 +51,31 @@ OVERCONFIDENT = 0.7
 
 def load_report(raw):
     report = raw.get("structured_output")
-    if report is None:  # 구조화 출력이 없으면 result 텍스트에서 JSON을 찾아 본다
-        text = raw.get("result", "")
-        report = json.loads(text[text.find("{"):text.rfind("}") + 1])
-    return report
+    if report is not None:
+        return report
+    # 구조화 출력이 없으면 result 텍스트에서 JSON 객체를 찾아 본다
+    text = raw.get("result") or ""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError(f"리포트 JSON을 찾지 못했습니다. result 앞부분: {text[:200]!r}")
+    try:
+        return json.loads(text[start:end + 1])
+    except json.JSONDecodeError as e:
+        raise ValueError(f"result의 JSON을 해석하지 못했습니다: {e}") from e
 
 
 def grade(report, exp):
-    top = min(report["candidates"], key=lambda c: c["rank"])
+    candidates = report.get("candidates") or []
+    if not candidates:
+        # 스키마는 최소 1개를 요구하지만 result 텍스트에서 꺼낸 리포트는 검증을 거치지 않는다
+        return {
+            "hit": False, "top": "-",
+            "expected": f"{'|'.join(sorted(exp['components']))}/{'|'.join(sorted(exp['categories']))}",
+            "is_incident": report.get("is_incident"), "evidence_ok": False,
+            "missing_sources": sorted(exp["required_sources"]), "cited_sources": [],
+            "confidence": None, "flags": ["원인 후보 없음"],
+        }
+    top = min(candidates, key=lambda c: c["rank"])
     incident_ok = report["is_incident"] == exp["is_incident"]
     cause_ok = top["component"] in exp["components"] and top["category"] in exp["categories"]
     hit = incident_ok and cause_ok
@@ -90,16 +107,28 @@ def grade(report, exp):
     }
 
 
+USAGE = "usage: grade.py <raw.json> <report.json 저장 경로> <scenario> [scores.jsonl]"
+
+
 def main():
+    if len(sys.argv) not in (4, 5):
+        print(USAGE, file=sys.stderr)
+        sys.exit(64)
     raw_path, report_path, scenario = sys.argv[1:4]
     scores_path = sys.argv[4] if len(sys.argv) > 4 else None
-    raw = json.load(open(raw_path))
-    report = load_report(raw)
-    json.dump(report, open(report_path, "w"), ensure_ascii=False, indent=2)
+    with open(raw_path, encoding="utf-8") as f:
+        raw = json.load(f)
+    try:
+        report = load_report(raw)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
 
     print(f"요약: {report['summary']}")
     print(f"장애 여부: {report['is_incident']}")
-    for c in sorted(report["candidates"], key=lambda c: c["rank"]):
+    for c in sorted(report.get("candidates") or [], key=lambda c: c["rank"]):
         print(f"\n#{c['rank']} [{c['component']} / {c['category']}] 확신도 {c['confidence']}")
         print(f"  원인: {c['cause']}")
         for e in c["evidence"]:
@@ -122,7 +151,7 @@ def main():
     if scores_path:
         line = {"scenario": scenario, "raw": raw_path, "model": sorted(raw.get("modelUsage", {}).keys()),
                 "num_turns": raw.get("num_turns"), "duration_ms": raw.get("duration_ms"), **g}
-        with open(scores_path, "a") as f:
+        with open(scores_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
