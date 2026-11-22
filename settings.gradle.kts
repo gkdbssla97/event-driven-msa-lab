@@ -6,4 +6,5 @@ include(
     "payment-service",
     "websocket-service",
     "inventory-service",
+    "lock-lab",
 )
